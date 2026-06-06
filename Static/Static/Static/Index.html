@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piano Pitch Detector</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: #0a0a0f; color: #e8e4f0; min-height: 100vh; padding-bottom: 32px; }
+  .header { padding: 20px 20px 12px; border-bottom: 0.5px solid #2a2535; }
+  .header h1 { font-size: 18px; font-weight: 600; color: #e8e4f0; letter-spacing: -0.3px; }
+  .header p  { font-size: 12px; color: #6b6480; margin-top: 3px; }
+  .upload-zone { margin: 16px 20px 0; border: 1.5px dashed #3a3450; border-radius: 16px; padding: 28px 20px; text-align: center; background: #0f0e1a; cursor: pointer; position: relative; }
+  .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-icon { font-size: 28px; margin-bottom: 8px; color: #4a4060; }
+  .upload-zone .label { font-size: 14px; font-weight: 500; color: #9d93c0; }
+  .upload-zone .sublabel { font-size: 11px; color: #4a4060; margin-top: 3px; }
+  .file-name { margin: 8px 20px 0; padding: 9px 14px; background: #13122a; border-radius: 10px; font-family: 'DM Mono', monospace; font-size: 11px; color: #7c6af7; display: none; word-break: break-all; }
+  .gap-row { margin: 12px 20px 0; }
+  .gap-box { background: #0f0e1a; border: 0.5px solid #2a2535; border-radius: 12px; padding: 10px 12px; }
+  .gap-box label { font-size: 10px; color: #6b6480; display: block; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .gap-box input { background: transparent; border: none; color: #e8e4f0; font-family: 'DM Mono', monospace; font-size: 13px; width: 100%; outline: none; -webkit-appearance: none; }
+  .analyze-btn { display: block; width: calc(100% - 40px); margin: 14px 20px 0; padding: 14px; background: #7c6af7; color: #fff; border: none; border-radius: 12px; font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .analyze-btn:disabled { background: #2a2535; color: #4a4060; cursor: not-allowed; }
+  .status-bar { margin: 12px 20px 0; padding: 10px 14px; background: #0f0e1a; border-radius: 10px; font-size: 12px; color: #7c6af7; font-family: 'DM Mono', monospace; display: none; }
+  .progress-track { height: 3px; background: #2a2535; border-radius: 2px; margin: 6px 0 0; overflow: hidden; }
+  .progress-fill { height: 100%; background: #7c6af7; border-radius: 2px; width: 0%; transition: width 0.4s; }
+  .error-msg { margin: 12px 20px 0; padding: 12px 14px; background: #1a0e0e; border: 0.5px solid #5a2020; border-radius: 10px; font-size: 12px; color: #f7846a; display: none; }
+  .results { margin: 18px 20px 0; display: none; }
+  .results-header { font-size: 11px; color: #6b6480; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+  .note-card { background: #0f0e1a; border: 0.5px solid #2a2535; border-radius: 14px; padding: 13px 14px; margin-bottom: 9px; }
+  .note-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .note-label { font-size: 18px; font-weight: 600; color: #e8e4f0; min-width: 36px; }
+  .note-measured-freq { font-family: 'DM Mono', monospace; font-size: 15px; color: #c4b8f0; flex: 1; }
+  .note-measured-freq span { font-size: 10px; color: #4a4060; margin-left: 3px; }
+  .deviation-badge { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; padding: 4px 10px; border-radius: 8px; white-space: nowrap; }
+  .dev-flat { background: #2a1010; color: #f7846a; }
+  .dev-sharp { background: #0a2018; color: #63d0a8; }
+  .dev-intune { background: #1a1830; color: #7c6af7; }
+  .dev-bar-wrap { position: relative; height: 6px; background: #1e1c2e; border-radius: 3px; margin-bottom: 10px; overflow: hidden; }
+  .dev-bar-center { position: absolute; left: 50%; top: 0; width: 1px; height: 100%; background: #3a3450; }
+  .dev-bar-fill { position: absolute; top: 0; height: 100%; border-radius: 3px; }
+  .dev-bar-fill.flat { background: #f7846a; }
+  .dev-bar-fill.sharp { background: #63d0a8; }
+  .dev-bar-fill.intune { background: #7c6af7; }
+  .freq-row { display: flex; border: 0.5px solid #2a2535; border-radius: 10px; overflow: hidden; }
+  .freq-cell { flex: 1; padding: 8px 10px; border-right: 0.5px solid #2a2535; text-align: center; }
+  .freq-cell:last-child { border-right: none; }
+  .freq-cell .fc-label { font-size: 9px; color: #4a4060; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; }
+  .freq-cell .fc-val { font-family: 'DM Mono', monospace; font-size: 11px; color: #9d93c0; }
+  .freq-cell .fc-val.primary { color: #c4b8f0; font-size: 12px; }
+  .note-footer { display: flex; gap: 8px; margin-top: 9px; align-items: center; }
+  .conf-bar-wrap { flex: 1; }
+  .conf-bar { height: 3px; background: #2a2535; border-radius: 2px; overflow: hidden; }
+  .conf-fill { height: 100%; background: #4a4060; border-radius: 2px; }
+  .conf-label { font-size: 9px; color: #4a4060; font-family: 'DM Mono', monospace; margin-bottom: 2px; }
+  .note-time-label { font-size: 10px; color: #4a4060; font-family: 'DM Mono', monospace; white-space: nowrap; }
+  .warn-badge { font-size: 10px; color: #f0c060; background: #1e1800; border-radius: 6px; padding: 2px 8px; font-family: 'DM Mono', monospace; }
+  .reset-btn { display: none; width: calc(100% - 40px); margin: 14px 20px 0; padding: 11px; background: transparent; color: #6b6480; border: 0.5px solid #2a2535; border-radius: 12px; font-family: 'DM Sans', sans-serif; font-size: 13px; cursor: pointer; }
+  .legend { margin: 14px 20px 0; padding: 10px 14px; background: #0a0e18; border: 0.5px solid #1e2535; border-radius: 10px; font-size: 10px; color: #4a6080; font-family: 'DM Mono', monospace; line-height: 1.7; display: none; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Piano Pitch Detector</h1>
+  <p>A0 – A7 · fundamental frequency vs. stretched tuning</p>
+</div>
+<div class="upload-zone" id="uploadZone">
+  <input type="file" id="fileInput" accept="audio/*,video/*,.mov,.mp4,.m4v,.m4a,.aac,.mp3,.wav,.ogg,.flac,.caf" />
+  <div class="upload-icon">🎵</div>
+  <div class="label">Tap to select audio or video file</div>
+  <div class="sublabel">MOV, MP4, MP3, M4A, WAV, AAC, OGG and more</div>
+</div>
+<div class="file-name" id="fileName"></div>
+<div class="gap-row">
+  <div class="gap-box">
+    <label>Min gap between notes (ms)</label>
+    <input type="number" id="minGap" value="300" min="100" max="2000" />
+  </div>
+</div>
+<button class="analyze-btn" id="analyzeBtn" disabled>Analyze A0 – A7</button>
+<div class="error-msg" id="errorMsg"></div>
+<div class="status-bar" id="statusBar">
+  <span id="statusText">Ready</span>
+  <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+</div>
+<div class="results" id="results">
+  <div class="results-header">Results — cents deviation from stretched target</div>
+  <div id="noteList"></div>
+</div>
+<div class="legend" id="legend">
+  ET = equal temperament (A4=440 Hz)<br>
+  Stretched = Railsback curve target for this note<br>
+  Deviation = how flat/sharp vs. stretched target<br>
+  Negative cents = flat · Positive cents = sharp
+</div>
+<button class="reset-btn" id="resetBtn">Clear &amp; start over</button>
+<script>
+const fileInput    = document.getElementById('fileInput');
+const analyzeBtn   = document.getElementById('analyzeBtn');
+const statusBar    = document.getElementById('statusBar');
+const statusText   = document.getElementById('statusText');
+const progressFill = document.getElementById('progressFill');
+const results      = document.getElementById('results');
+const noteList     = document.getElementById('noteList');
+const errorMsg     = document.getElementById('errorMsg');
+const fileNameEl   = document.getElementById('fileName');
+const resetBtn     = document.getElementById('resetBtn');
+const legend       = document.getElementById('legend');
+let selectedFile = null;
+fileInput.addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  selectedFile = f;
+  fileNameEl.textContent = f.name;
+  fileNameEl.style.display = 'block';
+  hideError();
+  results.style.display = 'none';
+  resetBtn.style.display = 'none';
+  legend.style.display = 'none';
+  statusBar.style.display = 'none';
+  analyzeBtn.disabled = false;
+});
+function showError(msg) { errorMsg.textContent = msg; errorMsg.style.display = 'block'; }
+function hideError() { errorMsg.style.display = 'none'; }
+function formatTime(s) {
+  const m = Math.floor(s / 60), sec = (s % 60).toFixed(2).padStart(5, '0');
+  return m > 0 ? `${m}:${sec}` : `${sec}s`;
+}
+function devBarHTML(cents) {
+  const MAX = 25;
+  const clamped = Math.max(-MAX, Math.min(MAX, cents));
+  const pct = Math.abs(clamped) / MAX * 50;
+  const cls = clamped < -0.5 ? 'flat' : clamped > 0.5 ? 'sharp' : 'intune';
+  const leftStyle = clamped < 0 ? `left:${50-pct}%;width:${pct}%;` : `left:50%;width:${pct}%;`;
+  return `<div class="dev-bar-wrap"><div class="dev-bar-center"></div><div class="dev-bar-fill ${cls}" style="${leftStyle}"></div></div>`;
+}
+analyzeBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  hideError();
+  analyzeBtn.disabled = true;
+  results.style.display = 'none';
+  resetBtn.style.display = 'none';
+  legend.style.display = 'none';
+  noteList.innerHTML = '';
+  statusBar.style.display = 'block';
+  progressFill.style.background = '#7c6af7';
+  const minGap = parseInt(document.getElementById('minGap').value) || 300;
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+  fd.append('minGap', minGap);
+  let fake = 5;
+  const ticker = setInterval(() => {
+    if (fake < 80) {
+      fake += Math.random() * 3;
+      progressFill.style.width = Math.min(fake, 80) + '%';
+      statusText.textContent = fake < 20 ? 'Uploading…' : fake < 50 ? 'Decoding audio…' : 'Detecting fundamentals…';
+    }
+  }, 450);
+  try {
+    const res = await fetch('/analyze', { method: 'POST', body: fd });
+    clearInterval(ticker);
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Server error'); }
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (!data.notes || data.notes.length === 0) throw new Error('No notes detected. Try lowering the min gap.');
+    statusText.textContent = `Found ${data.count} note${data.count !== 1 ? 's' : ''} — matched to A0–A7`;
+    progressFill.style.width = '100%';
+    progressFill.style.background = '#63d0a8';
+    data.notes.forEach(note => {
+      const c = note.cents_from_stretch;
+      const devCls   = c < -0.5 ? 'dev-flat' : c > 0.5 ? 'dev-sharp' : 'dev-intune';
+      const devLabel = c < -0.5 ? `${c.toFixed(1)}¢ flat` : c > 0.5 ? `+${c.toFixed(1)}¢ sharp` : 'in tune';
+      const confPct  = Math.round(note.confidence * 100);
+      const card = document.createElement('div');
+      card.className = 'note-card';
+      card.innerHTML = `
+        <div class="note-top">
+          <div class="note-label">${note.note_label}</div>
+          <div class="note-measured-freq">${note.freq_measured.toFixed(3)} Hz<span>measured</span></div>
+          <div class="deviation-badge ${devCls}">${devLabel}</div>
+        </div>
+        ${devBarHTML(c)}
+        <div class="freq-row">
+          <div class="freq-cell"><div class="fc-label">Measured</div><div class="fc-val primary">${note.freq_measured.toFixed(3)}</div></div>
+          <div class="freq-cell"><div class="fc-label">Stretched</div><div class="fc-val">${note.freq_stretched.toFixed(3)}</div></div>
+          <div class="freq-cell"><div class="fc-label">Equal temp</div><div class="fc-val">${note.freq_et.toFixed(3)}</div></div>
+          <div class="freq-cell"><div class="fc-label">Railsback</div><div class="fc-val">${note.railsback_offset > 0 ? '+' : ''}${note.railsback_offset}¢</div></div>
+        </div>
+        <div class="note-footer">
+          <div class="conf-bar-wrap">
+            <div class="conf-label">confidence ${confPct}%</div>
+            <div class="conf-bar"><div class="conf-fill" style="width:${confPct}%"></div></div>
+          </div>
+          <div class="note-time-label">@ ${formatTime(note.time)} · ${note.duration.toFixed(2)}s</div>
+          ${note.confidence < 0.75 ? '<div class="warn-badge">review</div>' : ''}
+        </div>`;
+      noteList.appendChild(card);
+    });
+    if (data.count < 8) {
+      const warn = document.createElement('div');
+      warn.style.cssText = 'margin-top:8px;padding:10px 14px;background:#1e1800;border:0.5px solid #5a4000;border-radius:10px;font-size:12px;i#f0c060;font-family:DM Mono,monospace;';
+      warn.textContent = `Only ${data.count} of 8 notes detected. Try lowering the min gap.`;
+      noteList.appendChild(warn);
+    }
+    results.style.display = 'block';
+    legend.style.display = 'block';
+    resetBtn.style.display = 'block';
+  } catch(err) {
+    clearInterval(ticker);
+    showError(err.message || 'Error occurred. Please try again.');
+    statusBar.style.display = 'none';
+    analyzeBtn.disabled = false;
+  }
+});
+resetBtn.addEventListener('click', () => {
+  selectedFile = null; fileInput.value = '';
+  fileNameEl.style.display = 'none';
+  results.style.display = 'none'; legend.style.display = 'none';
+  statusBar.style.display = 'none'; resetBtn.style.display = 'none';
+  noteList.innerHTML = ''; hideError();
+  analyzeBtn.disabled = true;
+});
+</script>
+</body>
+</html>

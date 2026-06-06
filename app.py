@@ -30,11 +30,13 @@ def cents_from_target(measured, target):
         return None
     return 1200.0 * np.log2(measured / target)
 
-def extract_audio(src_path):
+def extract_audio(src_path, max_seconds=45):
     wav_path = src_path + '.wav'
     subprocess.run(
-        ['ffmpeg', '-y', '-i', src_path, '-ac', '1', '-ar', '44100',
-         '-vn', '-f', 'wav', wav_path],
+        ['ffmpeg', '-y', '-vn', '-i', src_path,
+         '-t', str(max_seconds),
+         '-ac', '1', '-ar', '44100',
+         '-f', 'wav', wav_path],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return wav_path
 

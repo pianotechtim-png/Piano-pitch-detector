@@ -8,7 +8,6 @@ import os
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
-# ── Stretched tuning targets (Railsback curve) ──────────────────────────────
 RAILSBACK_A = {
     21: ('A0', -16.0),
     33: ('A1', -10.0),
@@ -111,9 +110,8 @@ def detect_8_a_notes(audio_path, min_gap_ms=300):
         label, rb_offset = RAILSBACK_A[target_midi]
         et_f      = et_freq(target_midi)
         stretch_f = stretched_target(target_midi)
-        cents_from_et     = cents_from_target(measured, et_f)
+        cents_from_et      = cents_from_target(measured, et_f)
         cents_from_stretch = cents_from_target(measured, stretch_f)
-
         results.append({
             'index':              i + 1,
             'note_label':         label,

@@ -151,6 +151,35 @@ def harmonic_f0(seg, sr, f0_expected, n_search=12):
     cw = np.cumsum(w_s)
     return float(implied_s[np.searchsorted(cw, cw[-1] / 2)])
 
+TREBLE_NOTES = {93, 105}   # A6, A7: YIN octave-errors here; use direct FFT peak
+TREBLE_MAX_MIDI = 105        # highest slot; A7
+
+def treble_fft_pitch(seg, sr, f_expected, search_cents=200):
+    """For A6/A7 the fundamental is strong in the spectrum but short/quiet, and
+    YIN tends to lock onto a sub-octave. Pick the strongest FFT peak within a
+    window around the expected fundamental instead -- no octave error."""
+    seg = seg.astype(np.float64); seg = seg - np.mean(seg)
+    if np.max(np.abs(seg)) < 1e-7:
+        return None
+    seg = seg * np.hanning(len(seg))
+    nfft = 1 << int(np.ceil(np.log2(max(len(seg), 1) * 8)))
+    spec = np.abs(np.fft.rfft(seg, nfft))
+    freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
+    lo = f_expected * 2 ** (-search_cents / 1200.0)
+    hi = f_expected * 2 ** (search_cents / 1200.0)
+    band = (freqs >= lo) & (freqs <= hi)
+    if not band.any():
+        return None
+    idx = np.where(band)[0]
+    kpk = idx[int(np.argmax(spec[idx]))]
+    if 0 < kpk < len(spec) - 1:
+        a, b, c = spec[kpk - 1], spec[kpk], spec[kpk + 1]
+        den = (a - 2 * b + c)
+        kf = kpk + 0.5 * (a - c) / den if den != 0 else kpk
+    else:
+        kf = kpk
+    return kf / nfft * sr
+
 def detect_8_a_notes(audio_path, min_gap_ms=300, preset='average'):
     sr, y = load_wav_mono(audio_path)
     curve = STRETCH_PRESETS.get(preset, STRETCH_PRESETS[DEFAULT_PRESET])
@@ -238,30 +267,45 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='average'):
     slot = 0  # index into A_MIDI_ORDER
     for b in blobs:
         placed = False
-        # Try to seat this blob in the current slot or a later one (notes may be
-        # skipped, which advances the slot pointer past the gap).
         for s in range(slot, len(A_MIDI_ORDER)):
             midi = A_MIDI_ORDER[s]
             et = et_freq(midi)
-            c = 1200.0 * np.log2(b['rough'] / et)
-            # Don't seat into a slot the blob is far ABOVE -- that means we've
-            # passed this note's pitch region; let a later slot try.
+
+            if midi in TREBLE_NOTES:
+                # YIN is unreliable up here (it can read an A7 as ~20 Hz). Don't
+                # trust rough at all: probe the spectrum directly for a strong
+                # peak near this slot's expected pitch. If found, that IS the
+                # measurement and the seating decision in one step.
+                f_fft = treble_fft_pitch(b['seg'], sr, NOMINAL_A[midi],
+                                         search_cents=ACCEPT_CENTS)
+                if f_fft is None:
+                    # no peak in this slot's band; let a later treble slot try,
+                    # but only if the rough pitch isn't clearly a lower note.
+                    rough = b['rough']
+                    if rough > 0 and 1200.0 * np.log2(rough / et) < -ACCEPT_CENTS \
+                       and midi != TREBLE_MAX_MIDI:
+                        continue
+                    break
+                c = 1200.0 * np.log2(f_fft / et)
+                if abs(c) <= ACCEPT_CENTS:
+                    assignments[midi] = {'freq': float(f_fft), 'energy': b['energy'],
+                                         'time': b['time'], 'dur': b['dur']}
+                    slot = s + 1; placed = True; break
+                continue
+
+            # Non-treble: use rough YIN to seat, refine bass via harmonics.
+            rough = b['rough']
+            c = 1200.0 * np.log2(rough / et)
             if c > ACCEPT_CENTS:
                 continue
             if abs(c) <= ACCEPT_CENTS:
-                # Refine pitch now that we know the intended note.
                 if midi in HARMONIC_NOTES:
-                    f0 = harmonic_f0(b['seg'], sr, NOMINAL_A[midi]) or b['rough']
+                    f0 = harmonic_f0(b['seg'], sr, NOMINAL_A[midi]) or rough
                 else:
-                    f0 = b['rough']
-                entry = {'freq': float(f0), 'energy': b['energy'],
-                         'time': b['time'], 'dur': b['dur']}
-                assignments[midi] = entry
-                slot = s + 1
-                placed = True
-                break
-            # c < -ACCEPT_CENTS: blob is far BELOW this slot. Since slots only go
-            # up in pitch, it can't fit any later slot either -> garbage.
+                    f0 = rough
+                assignments[midi] = {'freq': float(f0), 'energy': b['energy'],
+                                     'time': b['time'], 'dur': b['dur']}
+                slot = s + 1; placed = True; break
             break
         if not placed:
             rejected += 1

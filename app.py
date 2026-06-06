@@ -5,7 +5,7 @@ import librosa
 import tempfile
 import os
 
-app = Flask(__name__, static_folder='static')
+app = Flask(__name__, static_folder='Static')
 CORS(app)
 
 RAILSBACK_A = {
@@ -131,7 +131,7 @@ def detect_8_a_notes(audio_path, min_gap_ms=300):
 
 @app.route('/')
 def index():
-    return send_from_directory('static', 'index.html')
+    return send_from_directory('Static', 'index.html')
 
 @app.route('/analyze', methods=['POST'])
 def analyze():

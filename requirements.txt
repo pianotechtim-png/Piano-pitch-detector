@@ -1,8 +1,5 @@
 flask
 flask-cors
 numpy
-scipy==1.11.4
-librosa==0.10.1
-soundfile
-audioread
+scipy
 gunicorn

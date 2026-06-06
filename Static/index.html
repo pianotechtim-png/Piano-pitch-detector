@@ -60,6 +60,18 @@
   .spinner{display:inline-block; width:18px; height:18px; border:3px solid #ffffff66;
     border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite; vertical-align:-3px; margin-right:8px;}
   @keyframes spin{to{transform:rotate(360deg);}}
+  .howto{margin-top:14px; background:var(--card); border:1px solid var(--line);
+    border-radius:12px; overflow:hidden;}
+  .howto summary{list-style:none; cursor:pointer; padding:14px 16px; font-size:15px;
+    font-weight:600; display:flex; align-items:center; justify-content:space-between;}
+  .howto summary::-webkit-details-marker{display:none;}
+  .howto summary .chev{color:var(--dim); font-size:13px; transition:.2s;}
+  .howto[open] summary .chev{transform:rotate(90deg);}
+  .howto .body{padding:0 16px 16px; color:var(--txt); font-size:14px; line-height:1.6;}
+  .howto .body b{color:#fff;}
+  .howto .body .warn{color:var(--sharp); font-weight:600;}
+  .howto ol{margin:8px 0 0; padding-left:20px;}
+  .howto ol li{margin-bottom:6px;}
 </style>
 </head>
 <body>
@@ -67,6 +79,28 @@
   <h1>Piano Pitch Detector</h1>
   <div class="sub">A0 – A7 · deviation vs stretched tuning</div>
 </header>
+
+<details class="howto" open>
+  <summary>How to record <span class="chev">▶</span></summary>
+  <div class="body">
+    Play the 8 <b>A</b> keys one at a time, <b>lowest to highest</b>. Takes about 30 seconds.
+    <ol>
+      <li>Hold each note <b>2–3 seconds</b> and let it ring — don't rush.</li>
+      <li>Leave a <b>short silence</b> between notes.</li>
+      <li class="warn">Do not use the pedals.</li>
+      <li>Each <b>A</b> is the white key <b>between the 2nd and 3rd black keys</b> of the group of three black keys (see diagram).</li>
+      <li>Phone audio or video is fine. Record in a <b>quiet room</b>.</li>
+    </ol>
+    <svg viewBox="-3 -30 406 194" width="100%" style="max-width:400px;display:block;margin:6px auto 2px;" xmlns="http://www.w3.org/2000/svg">
+  <text x="220.0" y="-18" font-size="12" font-weight="700" text-anchor="middle" fill="#9d90ff" font-family="-apple-system,Helvetica,Arial,sans-serif">this is A</text><polygon points="214.0,-8 226.0,-8 220.0,0" fill="#9d90ff"/>
+  <rect x="0" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="40" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="80" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="120" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="160" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="200" y="0" width="40" height="132" rx="4" fill="#7c6cff" stroke="#c2c9d6" stroke-width="1.5"/><rect x="240" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="280" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="320" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="360" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/>
+  <rect x="28.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="68.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="148.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="188.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="228.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="308.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="348.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/>
+  <text x="220.0" y="118" font-size="17" font-weight="700" text-anchor="middle" fill="#fff" font-family="-apple-system,Helvetica,Arial,sans-serif">A</text>
+  <path d="M26.0,86 L26.0,92 L94.0,92 L94.0,86" fill="none" stroke="#6b7280" stroke-width="1.5"/><text x="60.0" y="105" font-size="10" text-anchor="middle" fill="#8b97a6" font-family="-apple-system,Helvetica,Arial,sans-serif">group of 2</text>
+  <path d="M146.0,86 L146.0,92 L254.0,92 L254.0,86" fill="none" stroke="#6b7280" stroke-width="1.5"/><text x="200.0" y="105" font-size="10" text-anchor="middle" fill="#8b97a6" font-family="-apple-system,Helvetica,Arial,sans-serif">group of 3</text>
+</svg>
+  </div>
+</details>
 
 <p class="label">Recording</p>
 <div class="drop" id="drop">
@@ -163,10 +197,10 @@ go.addEventListener('click', async ()=>{
 });
 
 function summaryText(avg){
-  if(avg===null||avg===undefined) return ["No reading","Couldn't read enough notes \u2014 try a clearer recording"];
+  if(avg===null||avg===undefined) return ["No reading","Couldn't read enough notes — try a clearer recording"];
   const flat=avg<0, mag=Math.abs(avg);
   const dir = mag<=5 ? "On pitch" : (flat ? "Flat" : "Sharp");
-  const tail = "Average " + (avg>0?"+":"") + avg + "\u00A2 vs stretched tuning.";
+  const tail = "Average " + (avg>0?"+":"") + avg + "¢ vs stretched tuning.";
   return [dir, tail];
 }
 

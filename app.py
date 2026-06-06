@@ -4,10 +4,12 @@ import numpy as np
 import librosa
 import tempfile
 import os
+import subprocess
 
 app = Flask(__name__, static_folder='Static')
 CORS(app)
 
+# ── Stretched tuning targets (Railsback curve) ──────────────────────────────
 RAILSBACK_A = {
     21: ('A0', -16.0),
     33: ('A1', -10.0),
@@ -31,17 +33,34 @@ def cents_from_target(measured_freq, target_freq):
         return None
     return 1200.0 * np.log2(measured_freq / target_freq)
 
+def extract_audio(src_path):
+    """Strip any audio/video file to a small mono 16kHz WAV using ffmpeg directly.
+    This avoids librosa/audioread pulling the whole video into memory."""
+    wav_path = src_path + '.wav'
+    subprocess.run(
+        ['ffmpeg', '-y', '-i', src_path,
+         '-ac', '1', '-ar', '16000', '-vn',
+         '-f', 'wav', wav_path],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    return wav_path
+
 def detect_8_a_notes(audio_path, min_gap_ms=300):
-    y, sr = librosa.load(audio_path, sr=22050, mono=True)
-    hop_length = 256
+    sr = 16000
+    y, sr = librosa.load(audio_path, sr=sr, mono=True, dtype=np.float32)
+
+    hop_length = 512
     frame_duration = hop_length / sr
 
     f0, voiced_flag, voiced_prob = librosa.pyin(
         y,
-        fmin=librosa.note_to_hz('G#0'),
-        fmax=librosa.note_to_hz('A#7'),
+        fmin=25.0,
+        fmax=3600.0,
         hop_length=hop_length,
         sr=sr,
+        frame_length=2048,
         fill_na=None
     )
 
@@ -110,8 +129,9 @@ def detect_8_a_notes(audio_path, min_gap_ms=300):
         label, rb_offset = RAILSBACK_A[target_midi]
         et_f      = et_freq(target_midi)
         stretch_f = stretched_target(target_midi)
-        cents_from_et      = cents_from_target(measured, et_f)
+        cents_from_et     = cents_from_target(measured, et_f)
         cents_from_stretch = cents_from_target(measured, stretch_f)
+
         results.append({
             'index':              i + 1,
             'note_label':         label,
@@ -143,13 +163,20 @@ def analyze():
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         file.save(tmp.name)
         tmp_path = tmp.name
+    wav_path = None
     try:
-        notes, found = detect_8_a_notes(tmp_path, min_gap_ms=min_gap)
+        wav_path = extract_audio(tmp_path)
+        notes, found = detect_8_a_notes(wav_path, min_gap_ms=min_gap)
         return jsonify({'notes': notes, 'count': len(notes), 'groups_found': found})
+    except subprocess.CalledProcessError:
+        return jsonify({'error': 'Could not read audio from that file'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
-        os.unlink(tmp_path)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        if wav_path and os.path.exists(wav_path):
+            os.unlink(wav_path)
 
 @app.route('/health', methods=['GET'])
 def health():

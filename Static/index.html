@@ -285,9 +285,16 @@ document.getElementById('modeseg').addEventListener('click',e=>{
   [...document.getElementById('modeseg').children].forEach(x=>x.classList.remove('active'));
   b.classList.add('active'); mode=b.dataset.mode;
   document.getElementById('monitorPanel').style.display = mode==='monitor'?'block':'none';
-  if(mode==='monitor') refreshMonitorUI();
+  const old=document.getElementById('monitorExtras'); if(old) old.remove();
+  if(mode==='monitor'){ refreshMonitorUI(); if(lastResult) postMonitor(lastResult, true); }
 });
-document.getElementById('pianoName').addEventListener('input', refreshMonitorUI);
+document.getElementById('pianoName').addEventListener('input', ()=>{
+  refreshMonitorUI();
+  if(mode==='monitor' && lastResult){
+    const old=document.getElementById('monitorExtras'); if(old) old.remove();
+    postMonitor(lastResult, true);
+  }
+});
 document.getElementById('saveManual').addEventListener('click',()=>{
   const a4v=parseFloat(a4ref.value)||440;
   const midis={A2:45,A3:57,A4:69,A5:81,A6:93};
@@ -408,7 +415,8 @@ function render(data){
   if(mode==='monitor') postMonitor(data);
 }
 
-function postMonitor(data){
+function postMonitor(data, reshow){
+  const prev=document.getElementById('monitorExtras'); if(prev) prev.remove();
   const name=curName(), s=data.summary||{};
   const store=loadStore(), p=name?store[name]:null;
   let card='';
@@ -432,7 +440,7 @@ function postMonitor(data){
   }
   card+='<button class="btn2 solid" id="saveBaselineBtn">Save this result as baseline for "'
     +(name||'…')+'"</button>';
-  out.insertAdjacentHTML('afterbegin', card);
+  out.insertAdjacentHTML('afterbegin', '<div id="monitorExtras">'+card+'</div>');
   document.getElementById('saveBaselineBtn').addEventListener('click',()=>{
     if(!lastResult) return;
     const freqs={};
@@ -440,7 +448,7 @@ function postMonitor(data){
     if(!Object.keys(freqs).length){ alert('No notes detected to save.'); return; }
     saveBaseline(freqs);
   });
-  if(name) addHistory(histEntry);
+  if(name && !reshow) addHistory(histEntry);
 }
 </script>
 </body>

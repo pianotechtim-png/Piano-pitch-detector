@@ -230,6 +230,7 @@ function render(data){
     html+=' · <span class="warn">missing: '+s.missing_notes.join(', ')+'</span>';
   }
   if(s.rejected_blobs){ html+=' · '+s.rejected_blobs+' noise blob(s) ignored'; }
+  html+='<br><span style="font-size:12px">Measures overall pitch level only — unison and fine-tuning quality can\'t be judged by this test.</span>';
   const presetNames={spinet:'Console / Spinet',standard:'Standard — grands & uprights'};
   html+='<br>Stretch curve: '+(presetNames[s.preset]||s.preset);
   if(s.a4 && s.a4!==440){ html+=' · A4 = '+s.a4+' Hz'; }

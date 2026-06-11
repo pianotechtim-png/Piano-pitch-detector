@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Piano Pitch Detector</title>
+<style>
+  :root{
+    --bg:#0b0d10; --card:#15191f; --card2:#1b212a; --line:#2a313c;
+    --txt:#e8edf3; --dim:#8b97a6; --accent:#7c6cff; --accent2:#9d90ff;
+    --flat:#4aa3ff; --sharp:#ff7a59; --ok:#37c98b;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:0 18px 60px;}
+  header{padding:26px 0 14px; border-bottom:1px solid var(--line); margin-bottom:20px;}
+  h1{font-size:26px; margin:0 0 4px; font-weight:700;}
+  .sub{color:var(--dim); font-size:15px;}
+  .label{font-size:12px; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--dim); margin:0 0 8px;}
+  .drop{border:2px dashed var(--line); border-radius:16px; padding:30px 16px;
+    text-align:center; cursor:pointer; background:var(--card); transition:.15s;}
+  .drop:active{background:var(--card2);}
+  .drop .note{font-size:34px;}
+  .drop .big{font-size:18px; margin-top:8px;}
+  .drop .small{color:var(--dim); font-size:13px; margin-top:4px;}
+  .filename{background:#16203a; color:#bcd2ff; border-radius:10px;
+    padding:12px 14px; margin-top:12px; font-family:ui-monospace,monospace; font-size:14px;
+    word-break:break-all;}
+  .seg-wrap{margin-top:22px;}
+  .seg{display:flex; gap:8px; flex-direction:column;}
+  .seg button{flex:1; padding:14px 12px; border-radius:12px; border:1.5px solid var(--line);
+    background:var(--card); color:var(--txt); font-size:15px; font-weight:600; cursor:pointer;
+    text-align:left; transition:.12s;}
+  .seg button .hint{display:block; font-weight:400; font-size:12px; color:var(--dim); margin-top:3px;}
+  .seg button.active{border-color:var(--accent); background:#1e1b35; color:#fff;}
+  .seg button.active .hint{color:var(--accent2);}
+  .field{background:var(--card); border-radius:12px; padding:14px 16px; margin-top:14px;}
+  .field input{width:100%; background:transparent; border:none; color:var(--txt);
+    font-size:20px; outline:none; margin-top:4px;}
+  .analyze{width:100%; margin-top:18px; padding:18px; border:none; border-radius:14px;
+    background:var(--accent); color:#fff; font-size:18px; font-weight:700; cursor:pointer;}
+  .analyze:disabled{background:#2a2740; color:#6f6a86;}
+  .err{background:#2a1614; color:#ff9b86; border-radius:12px; padding:14px 16px; margin-top:16px;}
+  .summary{margin-top:22px; background:var(--card2); border-radius:14px; padding:18px;
+    border:1px solid var(--line);}
+  .summary .head{font-size:20px; font-weight:700; margin:0 0 6px;}
+  .summary .meta{color:var(--dim); font-size:14px; line-height:1.5;}
+  .warn{color:var(--sharp);}
+  .results{margin-top:18px; display:flex; flex-direction:column; gap:10px;}
+  .row{background:var(--card); border-radius:12px; padding:14px 16px;}
+  .row .top{display:flex; justify-content:space-between; align-items:baseline;}
+  .row .nm{font-size:17px; font-weight:700;}
+  .row .hz{color:var(--dim); font-size:13px; font-family:ui-monospace,monospace;}
+  .row .cents{font-size:16px; font-weight:700;}
+  .bar{position:relative; height:8px; background:#0e1217; border-radius:6px; margin-top:10px;
+    overflow:hidden;}
+  .bar .mid{position:absolute; left:50%; top:0; bottom:0; width:2px; background:#3a4250;}
+  .bar .fill{position:absolute; top:0; bottom:0; border-radius:6px;}
+  .spinner{display:inline-block; width:18px; height:18px; border:3px solid #ffffff66;
+    border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite; vertical-align:-3px; margin-right:8px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .howto{margin-top:14px; background:var(--card); border:1px solid var(--line);
+    border-radius:12px; overflow:hidden;}
+  .howto summary{list-style:none; cursor:pointer; padding:14px 16px; font-size:15px;
+    font-weight:600; display:flex; align-items:center; justify-content:space-between;}
+  .howto summary::-webkit-details-marker{display:none;}
+  .howto summary .chev{color:var(--dim); font-size:13px; transition:.2s;}
+  .howto[open] summary .chev{transform:rotate(90deg);}
+  .howto .body{padding:0 16px 16px; color:var(--txt); font-size:14px; line-height:1.6;}
+  .howto .body b{color:#fff;}
+  .howto .body .warn{color:var(--sharp); font-weight:600;}
+  .howto ol{margin:8px 0 0; padding-left:20px;}
+  .howto ol li{margin-bottom:6px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Piano Pitch Detector</h1>
+  <div class="sub">A2 – A6 core test · deviation vs stretched tuning</div>
+</header>
+
+<details class="howto" open>
+  <summary>How to record <span class="chev">▶</span></summary>
+  <div class="body">
+    Play the 5 <b>A</b> keys from <b>A2 to A6</b>, one at a time, <b>lowest to highest</b>. Takes about 20 seconds.
+    <ol>
+      <li><b>A2 is the 3rd A from the bottom</b> of the keyboard. Play it, then each A going up — five in total.</li>
+      <li>Hold each note <b>2–3 seconds</b> and let it ring — don't rush.</li>
+      <li>Leave a <b>short silence</b> between notes.</li>
+      <li class="warn">Do not use the pedals.</li>
+      <li>Each <b>A</b> is the white key <b>between the 2nd and 3rd black keys</b> of the group of three black keys (see diagram).</li>
+      <li>Phone audio or video is fine. Record in a <b>quiet room</b>.</li>
+      <li>Playing all 8 A's (A0–A7) also works — the extra notes are shown for reference only.</li>
+    </ol>
+    <svg viewBox="-3 -30 406 194" width="100%" style="max-width:400px;display:block;margin:6px auto 2px;" xmlns="http://www.w3.org/2000/svg">
+  <text x="220.0" y="-18" font-size="12" font-weight="700" text-anchor="middle" fill="#9d90ff" font-family="-apple-system,Helvetica,Arial,sans-serif">this is A</text><polygon points="214.0,-8 226.0,-8 220.0,0" fill="#9d90ff"/>
+  <rect x="0" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="40" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="80" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="120" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="160" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="200" y="0" width="40" height="132" rx="4" fill="#7c6cff" stroke="#c2c9d6" stroke-width="1.5"/><rect x="240" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="280" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="320" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="360" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/>
+  <rect x="28.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="68.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="148.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="188.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="228.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="308.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/><rect x="348.0" y="0" width="24" height="80" rx="3" fill="#1b1f27" stroke="#0a0c10"/>
+  <text x="220.0" y="118" font-size="17" font-weight="700" text-anchor="middle" fill="#fff" font-family="-apple-system,Helvetica,Arial,sans-serif">A</text>
+  <path d="M26.0,86 L26.0,92 L94.0,92 L94.0,86" fill="none" stroke="#6b7280" stroke-width="1.5"/><text x="60.0" y="105" font-size="10" text-anchor="middle" fill="#8b97a6" font-family="-apple-system,Helvetica,Arial,sans-serif">group of 2</text>
+  <path d="M146.0,86 L146.0,92 L254.0,92 L254.0,86" fill="none" stroke="#6b7280" stroke-width="1.5"/><text x="200.0" y="105" font-size="10" text-anchor="middle" fill="#8b97a6" font-family="-apple-system,Helvetica,Arial,sans-serif">group of 3</text>
+</svg>
+  </div>
+</details>
+
+<p class="label">Recording</p>
+<div class="drop" id="drop">
+  <div class="note">🎵</div>
+  <div class="big">Tap to select audio or video file</div>
+  <div class="small">MOV, MP4, MP3, M4A, WAV, AAC, OGG and more</div>
+</div>
+<input type="file" id="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.ogg,.flac,.aiff,.caf,.mov,.mp4,.m4v,.3gp,audio/x-m4a,audio/m4a,audio/mp4,audio/aac,audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/flac,video/quicktime,video/mp4" style="display:none">
+<div id="fileShow"></div>
+
+<div class="seg-wrap">
+  <p class="label">Piano size (sets stretch curve)</p>
+  <div class="seg" id="seg">
+    <button data-preset="standard" class="active">Standard — grands &amp; uprights
+      <span class="hint">includes baby grands</span></button>
+    <button data-preset="spinet">Console / Spinet
+      <span class="hint">small verticals — deeper bass stretch</span></button>
+  </div>
+</div>
+
+<div class="field">
+  <p class="label" style="margin:0">A4 reference (Hz)</p>
+  <input type="number" id="a4ref" value="440" step="0.1" min="400" max="480">
+</div>
+
+<div class="field">
+  <p class="label" style="margin:0">Min gap between notes (ms)</p>
+  <input type="number" id="minGap" value="300">
+</div>
+
+<button class="analyze" id="go" disabled>Analyze A2 – A6</button>
+
+<div id="out"></div>
+
+<script>
+const drop=document.getElementById('drop');
+const fileInput=document.getElementById('file');
+const fileShow=document.getElementById('fileShow');
+const go=document.getElementById('go');
+const out=document.getElementById('out');
+const seg=document.getElementById('seg');
+let preset='standard';
+let chosenFile=null;
+
+// A4 reference persists between visits
+const a4ref=document.getElementById('a4ref');
+const savedA4=localStorage.getItem('a4ref');
+if(savedA4) a4ref.value=savedA4;
+a4ref.addEventListener('change',()=>localStorage.setItem('a4ref',a4ref.value));
+
+drop.addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',()=>{
+  if(fileInput.files.length){
+    chosenFile=fileInput.files[0];
+    fileShow.innerHTML='<div class="filename">'+chosenFile.name+'</div>';
+    go.disabled=false;
+  }
+});
+
+seg.addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  [...seg.children].forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  preset=b.dataset.preset;
+});
+
+function centsColor(c){
+  if(c===null||c===undefined) return 'var(--dim)';
+  if(Math.abs(c)<=5) return 'var(--ok)';
+  return c<0 ? 'var(--flat)' : 'var(--sharp)';
+}
+function fillBar(c){
+  // map -50..+50 cents to bar; clamp
+  const clamped=Math.max(-50,Math.min(50,c));
+  const half=Math.abs(clamped)/50*50; // percent of half-width
+  const color=centsColor(c);
+  if(c<0){
+    return '<div class="fill" style="right:50%;width:'+half+'%;background:'+color+'"></div>';
+  } else {
+    return '<div class="fill" style="left:50%;width:'+half+'%;background:'+color+'"></div>';
+  }
+}
+
+
+
+go.addEventListener('click', async ()=>{
+  if(!chosenFile) return;
+  go.disabled=true;
+  out.innerHTML='<button class="analyze" disabled><span class="spinner"></span>Analyzing… (first run can take ~1 min)</button>';
+  const fd=new FormData();
+  fd.append('file',chosenFile);
+  fd.append('preset',preset);
+  fd.append('minGap',document.getElementById('minGap').value||'300');
+  fd.append('a4',a4ref.value||'440');
+  try{
+    const r=await fetch('/analyze',{method:'POST',body:fd});
+    const data=await r.json();
+    if(data.error){ out.innerHTML='<div class="err">'+data.error+'</div>'; go.disabled=false; return; }
+    render(data);
+  }catch(e){
+    out.innerHTML='<div class="err">Network error: '+e.message+'</div>';
+  }
+  go.disabled=false;
+});
+
+const VERDICT_COLORS={green:'var(--ok)', yellow:'#ffc14d', red:'#ff5d5d', none:'var(--dim)'};
+const VERDICT_DOTS={green:'\u{1F7E2}', yellow:'\u{1F7E1}', red:'\u{1F534}', none:'\u26AA'};
+
+function render(data){
+  const s=data.summary||{};
+  const v=s.verdict||'none';
+  const head=s.verdict_label||"No reading";
+  let html='<div class="summary" style="border-left:5px solid '+VERDICT_COLORS[v]+'">';
+  html+='<p class="head">'+(VERDICT_DOTS[v]||'')+' '+head+'</p>';
+  html+='<div class="meta">';
+  if(s.weighted_avg_cents!==null && s.weighted_avg_cents!==undefined){
+    html+='Core reading (A2–A6, weighted): <b style="color:'+VERDICT_COLORS[v]+'">'
+      +(s.weighted_avg_cents>0?'+':'')+s.weighted_avg_cents+'¢</b> vs stretched tuning<br>';
+  }
+  html+='Detected '+(s.core_notes_detected||0)+' of 5 core notes';
+  if(s.notes_detected>s.core_notes_detected){
+    html+=' (+'+(s.notes_detected-s.core_notes_detected)+' extra)';
+  }
+  if(s.missing_notes && s.missing_notes.length){
+    html+=' · <span class="warn">missing: '+s.missing_notes.join(', ')+'</span>';
+  }
+  if(s.rejected_blobs){ html+=' · '+s.rejected_blobs+' noise blob(s) ignored'; }
+  const presetNames={spinet:'Console / Spinet',standard:'Standard — grands & uprights'};
+  html+='<br>Stretch curve: '+(presetNames[s.preset]||s.preset);
+  if(s.a4 && s.a4!==440){ html+=' · A4 = '+s.a4+' Hz'; }
+  html+='</div></div>';
+
+  html+='<div class="results">';
+  (data.notes||[]).forEach(n=>{
+    const c=n.cents_from_stretch;
+    const cstr=(c>0?'+':'')+ (c===null?'—':c) + '¢';
+    const dim=n.core?'':' style="opacity:.6"';
+    const badge=n.core?'':' <span style="font-size:11px;color:var(--dim);font-weight:400">info only</span>';
+    html+='<div class="row"'+dim+'><div class="top">'
+      +'<span class="nm">'+n.note_label+badge+'</span>'
+      +'<span class="cents" style="color:'+centsColor(c)+'">'+cstr+'</span></div>'
+      +'<div class="hz">'+n.freq_measured+' Hz · target '+n.freq_stretched+' Hz</div>'
+      +'<div class="bar"><div class="mid"></div>'+fillBar(c||0)+'</div>'
+      +'</div>';
+  });
+  html+='</div>';
+  out.innerHTML=html;
+}
+</script>
+</body>
+</html>

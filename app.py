@@ -26,7 +26,10 @@ DEFAULT_PRESET = 'standard'
 # Core verdict: A2-A6 weighted (A6 half-weight). A0/A1/A7 are informational
 # only -- their "correct" stretch varies too much piano-to-piano to judge.
 CORE_WEIGHTS = {45: 1.0, 57: 1.0, 69: 1.0, 81: 1.0, 93: 0.5}
-VERDICT_GREEN = 5.0   # |weighted avg| <= this -> in good shape
+# Green is deliberately strict: this test reads overall pitch LEVEL only and
+# cannot judge unisons or fine-tuning quality. A piano at "normal needs a
+# tuning" level should read yellow, not green.
+VERDICT_GREEN = 2.0   # |weighted avg| <= this -> nearly on pitch
 VERDICT_RED = 15.0    # |weighted avg| >  this -> pitch raise/correction
 
 # Backwards-compat: RAILSBACK_A holds (label, offset) for the selected curve.
@@ -361,9 +364,9 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
         wsum = sum(w for w, _ in core_pts)
         wavg = round(float(sum(w * c for w, c in core_pts) / wsum), 1)
         if abs(wavg) <= VERDICT_GREEN:
-            verdict, vlabel = 'green', 'In good shape'
+            verdict, vlabel = 'green', 'On pitch \u2014 fine tuning may still help'
         elif abs(wavg) <= VERDICT_RED:
-            verdict, vlabel = 'yellow', 'Drifting \u2014 keep an eye on it'
+            verdict, vlabel = 'yellow', 'Tuning recommended'
         elif wavg < 0:
             verdict, vlabel = 'red', 'Pitch raise recommended'
         else:

@@ -93,6 +93,23 @@
   .hist .hrow .hd{color:var(--dim);}
   .driftcard{margin-top:22px; background:var(--card2); border-radius:14px; padding:18px;
     border:1px solid var(--line);}
+  .chips{display:flex; gap:6px; margin-top:14px;}
+  .chip{flex:1; padding:10px 4px; border-radius:10px; background:var(--card);
+    border:1.5px solid var(--line); text-align:center; font-size:13px; font-weight:700;
+    color:var(--dim);}
+  .chip .cc{display:block; font-size:11px; font-weight:400; margin-top:2px;}
+  .chip.cur{border-color:var(--accent); color:#fff;}
+  .chip.done{border-color:var(--ok); color:var(--ok);}
+  .chip.skip{opacity:.4;}
+  .livebox{background:var(--card2); border:1px solid var(--line); border-radius:14px;
+    padding:22px 16px; margin-top:12px; text-align:center;}
+  .livebox .lp{font-size:30px; font-weight:800;}
+  .livebox .lr{font-size:18px; color:var(--dim); margin-top:8px; min-height:24px;
+    font-family:ui-monospace,monospace;}
+  .lvl{height:6px; background:#0e1217; border-radius:4px; margin-top:14px; overflow:hidden;}
+  .lvl div{height:100%; width:0%; background:var(--accent); border-radius:4px; transition:width .1s;}
+  .liverow{display:flex; gap:8px;}
+  .liverow .btn2{flex:1;}
 </style>
 </head>
 <body>
@@ -152,6 +169,29 @@
 </details>
 
 <p class="label">Recording</p>
+<div class="modeseg" id="srcseg">
+  <button data-src="live" class="active">🎤 Record live</button>
+  <button data-src="file">📁 Upload a file</button>
+</div>
+
+<div id="livePanel">
+  <button class="analyze" id="liveStart" style="margin-top:12px">🎤 Start listening</button>
+  <div id="liveUI" style="display:none">
+    <div class="chips" id="liveChips"></div>
+    <div class="livebox">
+      <div class="lp" id="livePrompt">Play A2</div>
+      <div class="lr" id="liveReading">listening…</div>
+      <div class="lvl"><div id="lvlFill"></div></div>
+    </div>
+    <div class="liverow" style="margin-top:10px">
+      <button class="btn2" id="liveSkip">Skip note</button>
+      <button class="btn2" id="liveStop">Cancel</button>
+    </div>
+  </div>
+  <div class="status" style="margin-top:8px">Audio is analyzed on your device — nothing is uploaded.</div>
+</div>
+
+<div id="filePanel" style="display:none">
 <div class="drop" id="drop">
   <div class="note">🎵</div>
   <div class="big">Tap to select audio or video file</div>
@@ -159,6 +199,12 @@
 </div>
 <input type="file" id="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.ogg,.flac,.aiff,.caf,.mov,.mp4,.m4v,.3gp,audio/x-m4a,audio/m4a,audio/mp4,audio/aac,audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/flac,video/quicktime,video/mp4" style="display:none">
 <div id="fileShow"></div>
+<div class="field">
+  <p class="label" style="margin:0">Min gap between notes (ms)</p>
+  <input type="number" id="minGap" value="300">
+</div>
+<button class="analyze" id="go" disabled>Analyze A2 – A6</button>
+</div>
 
 <div class="seg-wrap">
   <p class="label">Piano size (sets stretch curve)</p>
@@ -175,12 +221,7 @@
   <input type="number" id="a4ref" value="440" step="0.1" min="400" max="480">
 </div>
 
-<div class="field">
-  <p class="label" style="margin:0">Min gap between notes (ms)</p>
-  <input type="number" id="minGap" value="300">
-</div>
 
-<button class="analyze" id="go" disabled>Analyze A2 – A6</button>
 
 <div id="out"></div>
 
@@ -450,6 +491,254 @@ function postMonitor(data, reshow){
   });
   if(name && !reshow) addHistory(histEntry);
 }
+
+// ==== LIVE LISTENING (Phase 4) — all analysis on-device =====================
+const srcseg=document.getElementById('srcseg');
+srcseg.addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  [...srcseg.children].forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  const liveOn=b.dataset.src==='live';
+  document.getElementById('livePanel').style.display=liveOn?'block':'none';
+  document.getElementById('filePanel').style.display=liveOn?'none':'block';
+  if(!liveOn) stopLive(false);
+});
+
+const LIVE_LABELS=['A2','A3','A4','A5','A6'];
+const LIVE_MIDI={A2:45,A3:57,A4:69,A5:81,A6:93};
+const FFT_NOTES={A5:1,A6:1};          // bass/mid use autocorrelation; treble uses FFT peak
+const LIVE_BAND=280;                  // cents search window around expected pitch
+// stretch curves must mirror app.py
+const LIVE_STRETCH={
+  spinet:  {A2:-8.0,A3:-3.5,A4:0.0,A5:3.6,A6:12.0},
+  standard:{A2:-4.0,A3:-2.0,A4:0.0,A5:3.4,A6:10.5}
+};
+const LIVE_WEIGHTS={A2:1,A3:1,A4:1,A5:1,A6:0.5};
+
+let AU=null, LV=null;
+
+function noteET(label,a4){ return a4*Math.pow(2,(LIVE_MIDI[label]-69)/12); }
+function liveTarget(label){
+  const a4=parseFloat(a4ref.value)||440;
+  return noteET(label,a4)*Math.pow(2,(LIVE_STRETCH[preset]||LIVE_STRETCH.standard)[label]/1200);
+}
+
+// ---- DSP helpers ----
+function fftRadix2(re,im){
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;
+    for(;j&bit;bit>>=1) j^=bit;
+    j^=bit;
+    if(i<j){ let t=re[i];re[i]=re[j];re[j]=t; t=im[i];im[i]=im[j];im[j]=t; }
+  }
+  for(let len=2;len<=n;len<<=1){
+    const ang=-2*Math.PI/len, wr=Math.cos(ang), wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){
+      let cr=1, ci=0;
+      for(let k=0;k<len/2;k++){
+        const ur=re[i+k], ui=im[i+k];
+        const vr=re[i+k+len/2]*cr-im[i+k+len/2]*ci;
+        const vi=re[i+k+len/2]*ci+im[i+k+len/2]*cr;
+        re[i+k]=ur+vr; im[i+k]=ui+vi;
+        re[i+k+len/2]=ur-vr; im[i+k+len/2]=ui-vi;
+        const ncr=cr*wr-ci*wi; ci=cr*wi+ci*wr; cr=ncr;
+      }
+    }
+  }
+}
+function detectFFT(buf,sr,fExp){
+  const N=buf.length, nfft=N*2;
+  const re=new Float64Array(nfft), im=new Float64Array(nfft);
+  for(let i=0;i<N;i++){
+    re[i]=buf[i]*(0.5-0.5*Math.cos(2*Math.PI*i/(N-1)));   // Hann
+  }
+  fftRadix2(re,im);
+  const lo=fExp*Math.pow(2,-LIVE_BAND/1200), hi=fExp*Math.pow(2,LIVE_BAND/1200);
+  const kLo=Math.max(1,Math.floor(lo/sr*nfft)), kHi=Math.min(nfft/2-2,Math.ceil(hi/sr*nfft));
+  if(kHi<=kLo) return null;
+  let kPk=kLo, mPk=0;
+  for(let k=kLo;k<=kHi;k++){
+    const m=re[k]*re[k]+im[k]*im[k];
+    if(m>mPk){ mPk=m; kPk=k; }
+  }
+  if(mPk<=0) return null;
+  const mag=k=>Math.sqrt(re[k]*re[k]+im[k]*im[k]);
+  const a=mag(kPk-1), b=mag(kPk), c=mag(kPk+1), den=a-2*b+c;
+  const kf=den!==0 ? kPk+0.5*(a-c)/den : kPk;
+  return kf/nfft*sr;
+}
+function detectAC(buf,sr,fExp){
+  const N=buf.length;
+  let mean=0; for(let i=0;i<N;i++) mean+=buf[i]; mean/=N;
+  const tauMin=Math.max(2,Math.floor(sr/(fExp*Math.pow(2,LIVE_BAND/1200))));
+  const tauMax=Math.min(N>>1,Math.ceil(sr/(fExp*Math.pow(2,-LIVE_BAND/1200))));
+  if(tauMax<=tauMin+2) return null;
+  const M=N-tauMax;
+  let e0=0; for(let i=0;i<M;i++){ const v=buf[i]-mean; e0+=v*v; }
+  if(e0<1e-9) return null;
+  const r=new Float64Array(tauMax+1);
+  let best=tauMin, bestR=-1;
+  for(let tau=tauMin;tau<=tauMax;tau++){
+    let s=0, e1=0;
+    for(let i=0;i<M;i++){
+      const a=buf[i]-mean, b=buf[i+tau]-mean;
+      s+=a*b; e1+=b*b;
+    }
+    const nr=e1>1e-9 ? s/Math.sqrt(e0*e1) : 0;
+    r[tau]=nr;
+    if(nr>bestR){ bestR=nr; best=tau; }
+  }
+  if(bestR<0.5) return null;            // not periodic enough
+  let tf=best;
+  if(best>tauMin && best<tauMax){
+    const a=r[best-1], b=r[best], c=r[best+1], den=a-2*b+c;
+    if(den!==0) tf=best+0.5*(a-c)/den;
+  }
+  return sr/tf;
+}
+
+// ---- live session state machine ----
+function chipHTML(){
+  return LIVE_LABELS.map((L,i)=>{
+    const st=LV.status[L];
+    let cls='chip'; let cc='';
+    if(st&&st.done){ cls+=' done'; cc=(st.cents>0?'+':'')+st.cents+'¢'; }
+    else if(st&&st.skipped){ cls+=' skip'; cc='skipped'; }
+    else if(i===LV.slot){ cls+=' cur'; cc='now'; }
+    return '<div class="'+cls+'">'+L+'<span class="cc">'+cc+'</span></div>';
+  }).join('');
+}
+function liveUIupdate(reading){
+  document.getElementById('liveChips').innerHTML=chipHTML();
+  const L=LIVE_LABELS[LV.slot];
+  document.getElementById('livePrompt').textContent = L ? 'Play '+L : 'Done';
+  if(reading!==undefined) document.getElementById('liveReading').textContent=reading;
+}
+
+async function startLive(){
+  try{
+    AU={};
+    AU.ctx=new (window.AudioContext||window.webkitAudioContext)();
+    await AU.ctx.resume();
+    AU.stream=await navigator.mediaDevices.getUserMedia({audio:{
+      echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
+    const node=AU.ctx.createMediaStreamSource(AU.stream);
+    AU.an=AU.ctx.createAnalyser(); AU.an.fftSize=16384;
+    node.connect(AU.an);
+    AU.buf=new Float32Array(AU.an.fftSize);
+  }catch(e){
+    alert('Microphone unavailable ('+e.message+'). Use "Upload a file" instead.');
+    AU=null; return;
+  }
+  LV={slot:0, phase:'listen', status:{}, stable:[], quiet:0, noise:0.0008, timer:null};
+  document.getElementById('liveStart').style.display='none';
+  document.getElementById('liveUI').style.display='block';
+  out.innerHTML='';
+  liveUIupdate('listening…');
+  LV.timer=setInterval(liveTick, 90);
+}
+
+function stopLive(finish){
+  if(LV&&LV.timer){ clearInterval(LV.timer); LV.timer=null; }
+  if(AU){
+    try{ AU.stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+    try{ AU.ctx.close(); }catch(e){}
+    AU=null;
+  }
+  document.getElementById('liveStart').style.display='block';
+  document.getElementById('liveUI').style.display='none';
+  if(finish && LV) finishLive();
+  if(!finish) LV=null;
+}
+
+function liveTick(){
+  if(!AU||!LV) return;
+  AU.an.getFloatTimeDomainData(AU.buf);
+  const sr=AU.ctx.sampleRate;
+  let s=0; for(let i=0;i<AU.buf.length;i++) s+=AU.buf[i]*AU.buf[i];
+  const rms=Math.sqrt(s/AU.buf.length);
+  const gate=Math.max(LV.noise*5, 0.0035);
+  if(rms<gate) LV.noise=0.97*LV.noise+0.03*rms;     // track noise floor while quiet
+  document.getElementById('lvlFill').style.width=Math.min(100,rms/gate*40)+'%';
+
+  if(LV.phase==='waitQuiet'){
+    if(rms<gate*0.7){ if(++LV.quiet>=4){ LV.phase='listen'; LV.stable=[]; liveUIupdate('listening…'); } }
+    else LV.quiet=0;
+    return;
+  }
+  const L=LIVE_LABELS[LV.slot];
+  if(!L) return;
+  if(rms<=gate){ return; }
+  const a4=parseFloat(a4ref.value)||440;
+  const fExp=noteET(L,a4);
+  const f=FFT_NOTES[L]? detectFFT(AU.buf,sr,fExp) : detectAC(AU.buf,sr,fExp);
+  if(!f||!isFinite(f)||f<=0){ liveUIupdate('…'); return; }
+  const cents=Math.round(12000*Math.log2(f/liveTarget(L)))/10;
+  liveUIupdate((cents>0?'+':'')+cents.toFixed(1)+'¢');
+  LV.stable.push(f);
+  if(LV.stable.length>6) LV.stable.shift();
+  if(LV.stable.length===6){
+    const cs=LV.stable.map(x=>1200*Math.log2(x/fExp));
+    if(Math.max(...cs)-Math.min(...cs)<=3.0){
+      const sorted=[...LV.stable].sort((a,b)=>a-b);
+      const med=(sorted[2]+sorted[3])/2;
+      captureNote(L, med);
+    }
+  }
+}
+
+function captureNote(L, f){
+  const c=Math.round(12000*Math.log2(f/liveTarget(L)))/10;
+  LV.status[L]={done:true, freq:f, cents:c};
+  LV.slot++; LV.stable=[]; LV.quiet=0; LV.phase='waitQuiet';
+  liveUIupdate('✓ '+L+' captured');
+  if(LV.slot>=LIVE_LABELS.length) stopLive(true);
+  else liveUIupdate();
+}
+
+function finishLive(){
+  const a4=parseFloat(a4ref.value)||440;
+  const notes=[]; const missing=[];
+  let ws=0, sum=0;
+  LIVE_LABELS.forEach(L=>{
+    const st=LV.status[L];
+    if(st&&st.done){
+      const stf=liveTarget(L);
+      notes.push({note_label:L, midi:LIVE_MIDI[L], core:true,
+        freq_measured:Math.round(st.freq*1000)/1000,
+        freq_stretched:Math.round(stf*1000)/1000,
+        cents_from_stretch:st.cents});
+      ws+=LIVE_WEIGHTS[L]; sum+=LIVE_WEIGHTS[L]*st.cents;
+    } else missing.push(L);
+  });
+  let wavg=null, verdict='none', vlabel='Not enough core notes for a verdict';
+  if(notes.length>=3){
+    wavg=Math.round(sum/ws*10)/10;
+    if(Math.abs(wavg)<=2){ verdict='green'; vlabel='On pitch — fine tuning may still help'; }
+    else if(Math.abs(wavg)<=15){ verdict='yellow'; vlabel='Tuning recommended'; }
+    else { verdict='red'; vlabel= wavg<0?'Pitch raise recommended':'Pitch correction recommended'; }
+  }
+  const devs=notes.map(n=>n.cents_from_stretch);
+  render({notes:notes, count:notes.length, summary:{
+    notes_detected:notes.length, core_notes_detected:notes.length,
+    missing_notes:missing, rejected_blobs:0,
+    avg_cents_from_stretch: devs.length?Math.round(devs.reduce((a,b)=>a+b,0)/devs.length*10)/10:null,
+    weighted_avg_cents:wavg, verdict:verdict, verdict_label:vlabel,
+    preset:preset, a4:a4
+  }});
+  LV=null;
+}
+
+document.getElementById('liveStart').addEventListener('click', startLive);
+document.getElementById('liveStop').addEventListener('click', ()=>stopLive(false));
+document.getElementById('liveSkip').addEventListener('click', ()=>{
+  if(!LV) return;
+  const L=LIVE_LABELS[LV.slot];
+  if(L) LV.status[L]={skipped:true};
+  LV.slot++; LV.stable=[]; LV.quiet=0; LV.phase='waitQuiet';
+  if(LV.slot>=LIVE_LABELS.length) stopLive(true); else liveUIupdate('listening…');
+});
 </script>
 </body>
 </html>

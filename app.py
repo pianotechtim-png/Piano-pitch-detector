@@ -12,13 +12,22 @@ CORS(app)
 # Note labels per MIDI
 A_LABELS = {21:'A0', 33:'A1', 45:'A2', 57:'A3', 69:'A4', 81:'A5', 93:'A6', 105:'A7'}
 
-# Three stretch presets (cents from equal temperament), keyed by piano size.
+# Two stretch presets (cents from equal temperament), derived from 13 real
+# PianoScope tunings (June 2026). Consoles/spinets need a much deeper bass;
+# grands and uprights share one curve (within ~3c at every A). A2-A6 are
+# nearly size-independent, which is why they form the core verdict.
 STRETCH_PRESETS = {
-    'spinet':  {21:-40.0, 33:-24.0, 45:-11.0, 57:-3.0, 69:0.0, 81:9.0,  93:20.0, 105:40.0},
-    'average': {21:-32.0, 33:-18.0, 45:-8.0,  57:-2.0, 69:0.0, 81:6.0,  93:14.0, 105:28.0},
-    'grand':   {21:-22.0, 33:-12.0, 45:-5.0,  57:-1.0, 69:0.0, 81:4.0,  93:9.0,  105:18.0},
+    'spinet':   {21:-58.0, 33:-21.0, 45:-8.0, 57:-3.5, 69:0.0, 81:3.6, 93:12.0, 105:30.0},
+    'standard': {21:-28.0, 33:-10.0, 45:-4.0, 57:-2.0, 69:0.0, 81:3.4, 93:10.5, 105:28.0},
 }
-DEFAULT_PRESET = 'average'
+PRESET_ALIASES = {'average': 'standard', 'grand': 'standard'}  # legacy clients
+DEFAULT_PRESET = 'standard'
+
+# Core verdict: A2-A6 weighted (A6 half-weight). A0/A1/A7 are informational
+# only -- their "correct" stretch varies too much piano-to-piano to judge.
+CORE_WEIGHTS = {45: 1.0, 57: 1.0, 69: 1.0, 81: 1.0, 93: 0.5}
+VERDICT_GREEN = 5.0   # |weighted avg| <= this -> in good shape
+VERDICT_RED = 15.0    # |weighted avg| >  this -> pitch raise/correction
 
 # Backwards-compat: RAILSBACK_A holds (label, offset) for the selected curve.
 # Built per-request now; this default keeps module-level helpers working.
@@ -36,11 +45,11 @@ def nearest_a(freq):
             best, best_c = midi, c
     return best, best_c
 
-def et_freq(midi):
-    return 440.0 * (2 ** ((midi - 69) / 12.0))
+def et_freq(midi, a4=440.0):
+    return a4 * (2 ** ((midi - 69) / 12.0))
 
-def stretched_target(midi, offset_cents):
-    return et_freq(midi) * (2 ** (offset_cents / 1200.0))
+def stretched_target(midi, offset_cents, a4=440.0):
+    return et_freq(midi, a4) * (2 ** (offset_cents / 1200.0))
 
 def cents_from_target(measured, target):
     if measured <= 0 or target <= 0:
@@ -180,9 +189,10 @@ def treble_fft_pitch(seg, sr, f_expected, search_cents=200):
         kf = kpk
     return kf / nfft * sr
 
-def detect_8_a_notes(audio_path, min_gap_ms=300, preset='average'):
+def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
     sr, y = load_wav_mono(audio_path)
     curve = STRETCH_PRESETS.get(preset, STRETCH_PRESETS[DEFAULT_PRESET])
+    nominal = {m: et_freq(m, a4) for m in A_MIDI_ORDER}
     if len(y) == 0:
         return [], {'notes_detected':0,'missing_notes':[A_LABELS[m] for m in A_MIDI_ORDER],'rejected_blobs':0,'avg_cents_from_stretch':None}
     hop = 512
@@ -269,14 +279,14 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='average'):
         placed = False
         for s in range(slot, len(A_MIDI_ORDER)):
             midi = A_MIDI_ORDER[s]
-            et = et_freq(midi)
+            et = et_freq(midi, a4)
 
             if midi in TREBLE_NOTES:
                 # YIN is unreliable up here (it can read an A7 as ~20 Hz). Don't
                 # trust rough at all: probe the spectrum directly for a strong
                 # peak near this slot's expected pitch. If found, that IS the
                 # measurement and the seating decision in one step.
-                f_fft = treble_fft_pitch(b['seg'], sr, NOMINAL_A[midi],
+                f_fft = treble_fft_pitch(b['seg'], sr, nominal[midi],
                                          search_cents=ACCEPT_CENTS)
                 if f_fft is None:
                     # no peak in this slot's band; let a later treble slot try,
@@ -300,7 +310,7 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='average'):
                 continue
             if abs(c) <= ACCEPT_CENTS:
                 if midi in HARMONIC_NOTES:
-                    f0 = harmonic_f0(b['seg'], sr, NOMINAL_A[midi]) or rough
+                    f0 = harmonic_f0(b['seg'], sr, nominal[midi]) or rough
                 else:
                     f0 = rough
                 assignments[midi] = {'freq': float(f0), 'energy': b['energy'],
@@ -319,10 +329,12 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='average'):
         f0 = m['freq']
         label = A_LABELS[midi]
         rb = curve[midi]
-        et_f = et_freq(midi)
-        st_f = stretched_target(midi, rb)
+        et_f = et_freq(midi, a4)
+        st_f = stretched_target(midi, rb, a4)
         results.append({
             'index': idx + 1,
+            'midi': midi,
+            'core': midi in CORE_WEIGHTS,
             'note_label': label,
             'freq_measured': round(f0, 3),
             'freq_et': round(et_f, 3),
@@ -335,17 +347,39 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='average'):
             'duration': round(m['dur'], 3),
         })
 
-    missing = [A_LABELS[m] for m in A_MIDI_ORDER if m not in assignments]
+    missing = [A_LABELS[m] for m in CORE_WEIGHTS if m not in assignments]
 
-    # Overall average deviation (vs stretched target) -> pricing signal
+    # Overall average deviation (vs stretched target), all detected notes
     devs = [r['cents_from_stretch'] for r in results if r['cents_from_stretch'] is not None]
     avg_dev = round(float(np.mean(devs)), 1) if devs else None
 
+    # Traffic-light verdict from the A2-A6 core, weighted
+    core_pts = [(CORE_WEIGHTS[r['midi']], r['cents_from_stretch'])
+                for r in results
+                if r['core'] and r['cents_from_stretch'] is not None]
+    if len(core_pts) >= 3:
+        wsum = sum(w for w, _ in core_pts)
+        wavg = round(float(sum(w * c for w, c in core_pts) / wsum), 1)
+        if abs(wavg) <= VERDICT_GREEN:
+            verdict, vlabel = 'green', 'In good shape'
+        elif abs(wavg) <= VERDICT_RED:
+            verdict, vlabel = 'yellow', 'Drifting \u2014 keep an eye on it'
+        elif wavg < 0:
+            verdict, vlabel = 'red', 'Pitch raise recommended'
+        else:
+            verdict, vlabel = 'red', 'Pitch correction recommended'
+    else:
+        wavg, verdict, vlabel = None, 'none', 'Not enough core notes for a verdict'
+
     summary = {
         'notes_detected': len(results),
+        'core_notes_detected': len(core_pts),
         'missing_notes': missing,
         'rejected_blobs': rejected,
         'avg_cents_from_stretch': avg_dev,
+        'weighted_avg_cents': wavg,
+        'verdict': verdict,
+        'verdict_label': vlabel,
     }
     return results, summary
 
@@ -359,9 +393,16 @@ def analyze():
         return jsonify({'error': 'No file provided'}), 400
     file = request.files['file']
     min_gap = int(request.form.get('minGap', 300))
-    preset = request.form.get('preset', 'average')
+    preset = request.form.get('preset', DEFAULT_PRESET)
+    preset = PRESET_ALIASES.get(preset, preset)
     if preset not in STRETCH_PRESETS:
-        preset = 'average'
+        preset = DEFAULT_PRESET
+    try:
+        a4 = float(request.form.get('a4', 440.0))
+    except (TypeError, ValueError):
+        a4 = 440.0
+    if not (400.0 <= a4 <= 480.0):
+        a4 = 440.0
     ext = os.path.splitext(file.filename)[1] if file.filename else '.tmp'
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         file.save(tmp.name)
@@ -369,8 +410,10 @@ def analyze():
     wav_path = None
     try:
         wav_path = extract_audio(tmp_path)
-        notes, summary = detect_8_a_notes(wav_path, min_gap_ms=min_gap, preset=preset)
+        notes, summary = detect_8_a_notes(wav_path, min_gap_ms=min_gap,
+                                          preset=preset, a4=a4)
         summary['preset'] = preset
+        summary['a4'] = a4
         return jsonify({'notes': notes, 'count': len(notes), 'summary': summary})
     except subprocess.CalledProcessError:
         return jsonify({'error': 'Could not read audio from that file'}), 500

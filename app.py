@@ -390,6 +390,17 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
 def index():
     return send_from_directory('Static', 'index.html')
 
+@app.route('/sw.js')
+def sw():
+    r = send_from_directory('Static', 'sw.js', mimetype='application/javascript')
+    r.headers['Cache-Control'] = 'no-cache'
+    return r
+
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('Static', 'manifest.json',
+                               mimetype='application/manifest+json')
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
     if 'file' not in request.files:

@@ -77,19 +77,21 @@
 <body>
 <header>
   <h1>Piano Pitch Detector</h1>
-  <div class="sub">A0 – A7 · deviation vs stretched tuning</div>
+  <div class="sub">A2 – A6 core test · deviation vs stretched tuning</div>
 </header>
 
 <details class="howto" open>
   <summary>How to record <span class="chev">▶</span></summary>
   <div class="body">
-    Play the 8 <b>A</b> keys one at a time, <b>lowest to highest</b>. Takes about 30 seconds.
+    Play the 5 <b>A</b> keys from <b>A2 to A6</b>, one at a time, <b>lowest to highest</b>. Takes about 20 seconds.
     <ol>
+      <li><b>A2 is the 3rd A from the bottom</b> of the keyboard. Play it, then each A going up — five in total.</li>
       <li>Hold each note <b>2–3 seconds</b> and let it ring — don't rush.</li>
       <li>Leave a <b>short silence</b> between notes.</li>
       <li class="warn">Do not use the pedals.</li>
       <li>Each <b>A</b> is the white key <b>between the 2nd and 3rd black keys</b> of the group of three black keys (see diagram).</li>
       <li>Phone audio or video is fine. Record in a <b>quiet room</b>.</li>
+      <li>Playing all 8 A's (A0–A7) also works — the extra notes are shown for reference only.</li>
     </ol>
     <svg viewBox="-3 -30 406 194" width="100%" style="max-width:400px;display:block;margin:6px auto 2px;" xmlns="http://www.w3.org/2000/svg">
   <text x="220.0" y="-18" font-size="12" font-weight="700" text-anchor="middle" fill="#9d90ff" font-family="-apple-system,Helvetica,Arial,sans-serif">this is A</text><polygon points="214.0,-8 226.0,-8 220.0,0" fill="#9d90ff"/>
@@ -114,13 +116,16 @@
 <div class="seg-wrap">
   <p class="label">Piano size (sets stretch curve)</p>
   <div class="seg" id="seg">
-    <button data-preset="spinet">Spinet/Mini Grands
-      <span class="hint">most stretch</span></button>
-    <button data-preset="average" class="active">Average sized uprights and grands
-      <span class="hint">standard stretch</span></button>
-    <button data-preset="grand">Long Grand
-      <span class="hint">least stretch</span></button>
+    <button data-preset="standard" class="active">Standard — grands &amp; uprights
+      <span class="hint">includes baby grands</span></button>
+    <button data-preset="spinet">Console / Spinet
+      <span class="hint">small verticals — deeper bass stretch</span></button>
   </div>
+</div>
+
+<div class="field">
+  <p class="label" style="margin:0">A4 reference (Hz)</p>
+  <input type="number" id="a4ref" value="440" step="0.1" min="400" max="480">
 </div>
 
 <div class="field">
@@ -128,7 +133,7 @@
   <input type="number" id="minGap" value="300">
 </div>
 
-<button class="analyze" id="go" disabled>Analyze A0 – A7</button>
+<button class="analyze" id="go" disabled>Analyze A2 – A6</button>
 
 <div id="out"></div>
 
@@ -139,8 +144,14 @@ const fileShow=document.getElementById('fileShow');
 const go=document.getElementById('go');
 const out=document.getElementById('out');
 const seg=document.getElementById('seg');
-let preset='average';
+let preset='standard';
 let chosenFile=null;
+
+// A4 reference persists between visits
+const a4ref=document.getElementById('a4ref');
+const savedA4=localStorage.getItem('a4ref');
+if(savedA4) a4ref.value=savedA4;
+a4ref.addEventListener('change',()=>localStorage.setItem('a4ref',a4ref.value));
 
 drop.addEventListener('click',()=>fileInput.click());
 fileInput.addEventListener('change',()=>{
@@ -185,6 +196,7 @@ go.addEventListener('click', async ()=>{
   fd.append('file',chosenFile);
   fd.append('preset',preset);
   fd.append('minGap',document.getElementById('minGap').value||'300');
+  fd.append('a4',a4ref.value||'440');
   try{
     const r=await fetch('/analyze',{method:'POST',body:fd});
     const data=await r.json();
@@ -196,34 +208,41 @@ go.addEventListener('click', async ()=>{
   go.disabled=false;
 });
 
-function summaryText(avg){
-  if(avg===null||avg===undefined) return ["No reading","Couldn't read enough notes — try a clearer recording"];
-  const flat=avg<0, mag=Math.abs(avg);
-  const dir = mag<=5 ? "On pitch" : (flat ? "Flat" : "Sharp");
-  const tail = "Average " + (avg>0?"+":"") + avg + "¢ vs stretched tuning.";
-  return [dir, tail];
-}
+const VERDICT_COLORS={green:'var(--ok)', yellow:'#ffc14d', red:'#ff5d5d', none:'var(--dim)'};
+const VERDICT_DOTS={green:'\u{1F7E2}', yellow:'\u{1F7E1}', red:'\u{1F534}', none:'\u26AA'};
 
 function render(data){
   const s=data.summary||{};
-  const [head,sub]=summaryText(s.avg_cents_from_stretch);
-  let html='<div class="summary">';
-  html+='<p class="head">'+head+'</p>';
-  html+='<div class="meta">'+sub+'<br>';
-  html+='Detected '+(s.notes_detected||0)+' of 8 notes';
+  const v=s.verdict||'none';
+  const head=s.verdict_label||"No reading";
+  let html='<div class="summary" style="border-left:5px solid '+VERDICT_COLORS[v]+'">';
+  html+='<p class="head">'+(VERDICT_DOTS[v]||'')+' '+head+'</p>';
+  html+='<div class="meta">';
+  if(s.weighted_avg_cents!==null && s.weighted_avg_cents!==undefined){
+    html+='Core reading (A2–A6, weighted): <b style="color:'+VERDICT_COLORS[v]+'">'
+      +(s.weighted_avg_cents>0?'+':'')+s.weighted_avg_cents+'¢</b> vs stretched tuning<br>';
+  }
+  html+='Detected '+(s.core_notes_detected||0)+' of 5 core notes';
+  if(s.notes_detected>s.core_notes_detected){
+    html+=' (+'+(s.notes_detected-s.core_notes_detected)+' extra)';
+  }
   if(s.missing_notes && s.missing_notes.length){
     html+=' · <span class="warn">missing: '+s.missing_notes.join(', ')+'</span>';
   }
   if(s.rejected_blobs){ html+=' · '+s.rejected_blobs+' noise blob(s) ignored'; }
-  const presetNames={spinet:'Spinet/Mini Grands',average:'Average uprights & grands',grand:'Long Grand'};
-  html+='<br>Stretch curve: '+(presetNames[s.preset]||s.preset)+'</div></div>';
+  const presetNames={spinet:'Console / Spinet',standard:'Standard — grands & uprights'};
+  html+='<br>Stretch curve: '+(presetNames[s.preset]||s.preset);
+  if(s.a4 && s.a4!==440){ html+=' · A4 = '+s.a4+' Hz'; }
+  html+='</div></div>';
 
   html+='<div class="results">';
   (data.notes||[]).forEach(n=>{
     const c=n.cents_from_stretch;
     const cstr=(c>0?'+':'')+ (c===null?'—':c) + '¢';
-    html+='<div class="row"><div class="top">'
-      +'<span class="nm">'+n.note_label+'</span>'
+    const dim=n.core?'':' style="opacity:.6"';
+    const badge=n.core?'':' <span style="font-size:11px;color:var(--dim);font-weight:400">info only</span>';
+    html+='<div class="row"'+dim+'><div class="top">'
+      +'<span class="nm">'+n.note_label+badge+'</span>'
       +'<span class="cents" style="color:'+centsColor(c)+'">'+cstr+'</span></div>'
       +'<div class="hz">'+n.freq_measured+' Hz · target '+n.freq_stretched+' Hz</div>'
       +'<div class="bar"><div class="mid"></div>'+fillBar(c||0)+'</div>'

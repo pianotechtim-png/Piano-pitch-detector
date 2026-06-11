@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PianoPitch">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Piano Pitch Detector</title>
 <style>
@@ -112,6 +118,10 @@
   .liverow .btn2{flex:1;}
   .linklike{background:none; border:none; color:var(--dim); text-decoration:underline;
     font-size:13px; display:block; margin:12px auto 0; cursor:pointer; font-family:inherit;}
+  #a2hs{display:none; margin-top:14px; background:var(--card2); border:1px solid var(--accent);
+    border-radius:12px; padding:12px 14px; font-size:14px; line-height:1.5; position:relative;}
+  #a2hs .x{position:absolute; top:6px; right:10px; background:none; border:none;
+    color:var(--dim); font-size:18px; cursor:pointer;}
 </style>
 </head>
 <body>
@@ -210,6 +220,11 @@
 <button class="analyze" id="go" disabled>Analyze A2 – A6</button>
 </div>
 <button class="linklike" id="srcToggle">Can't record live? Upload a recording instead</button>
+<div id="a2hs">
+  <button class="x" id="a2hsX">✕</button>
+  <b>Install as an app:</b> tap the <b>Share</b> button <span style="font-size:16px">⬆️</span>
+  in Safari, then <b>"Add to Home Screen."</b> Works offline for live testing.
+</div>
 
 <div class="seg-wrap">
   <p class="label">Piano size (sets stretch curve)</p>
@@ -743,6 +758,23 @@ document.getElementById('liveSkip').addEventListener('click', ()=>{
   LV.slot++; LV.stable=[]; LV.quiet=0; LV.phase='waitQuiet';
   if(LV.slot>=LIVE_LABELS.length) stopLive(true); else liveUIupdate('listening…');
 });
+
+// ==== PWA (Phase 3) ====
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+}
+(function(){
+  const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
+  const standalone=(window.navigator.standalone===true)||
+    (window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+  if(isIOS && !standalone && !localStorage.getItem('a2hsDismissed')){
+    document.getElementById('a2hs').style.display='block';
+  }
+  document.getElementById('a2hsX').addEventListener('click',()=>{
+    localStorage.setItem('a2hsDismissed','1');
+    document.getElementById('a2hs').style.display='none';
+  });
+})();
 </script>
 </body>
 </html>

@@ -54,6 +54,8 @@
   .summary .meta{color:var(--dim); font-size:14px; line-height:1.5;}
   .warn{color:var(--sharp);}
   .results{margin-top:18px; display:flex; flex-direction:column; gap:10px;}
+  .legend{display:flex; justify-content:space-between; color:var(--dim); font-size:11px;
+    margin:14px 2px -6px; letter-spacing:.04em;}
   .row{background:var(--card); border-radius:12px; padding:14px 16px;}
   .row .top{display:flex; justify-content:space-between; align-items:baseline;}
   .row .nm{font-size:17px; font-weight:700;}
@@ -288,7 +290,7 @@ function renderHistory(name){
   if(!name){ box.innerHTML=''; return; }
   const p=loadStore()[name];
   if(!p || !p.history || !p.history.length){ box.innerHTML=''; return; }
-  const dots={green:'\u{1F7E2}',yellow:'\u{1F7E1}',red:'\u{1F534}',none:'\u26AA'};
+  const dots={green:'\u{1F7E2}',yellow:'\u{1F7E1}',red:'\u{1F534}',none:'⚪'};
   let html='<p class="label" style="margin:12px 0 2px">History</p>';
   p.history.slice(-10).reverse().forEach(h=>{
     const val=(h.drift!==null&&h.drift!==undefined)
@@ -302,8 +304,8 @@ function renderHistory(name){
 
 function driftVerdict(w){
   if(Math.abs(w)<=DRIFT_GREEN) return ['green','Holding its tuning'];
-  if(Math.abs(w)<=DRIFT_RED) return ['yellow','Drifted \u2014 tuning recommended'];
-  return ['red', w<0?'Major drift \u2014 pitch raise likely':'Major drift \u2014 pitch correction likely'];
+  if(Math.abs(w)<=DRIFT_RED) return ['yellow','Drifted — tuning recommended'];
+  return ['red', w<0?'Major drift — pitch raise likely':'Major drift — pitch correction likely'];
 }
 
 function computeDrift(notes, baseline){
@@ -390,10 +392,16 @@ seg.addEventListener('click',e=>{
   preset=b.dataset.preset;
 });
 
+// Smooth 3-way gradient: too flat -> red, in range -> green, too sharp -> blue.
+// Hue interpolates continuously; clamps to full red/blue at the +-15c verdict
+// threshold. (No more confusing hard green/blue cutoff at 5c.)
 function centsColor(c){
-  if(c===null||c===undefined) return 'var(--dim)';
-  if(Math.abs(c)<=5) return 'var(--ok)';
-  return c<0 ? 'var(--flat)' : 'var(--sharp)';
+  if(c===null||c===undefined||isNaN(c)) return 'var(--dim)';
+  const x=Math.max(-15,Math.min(15,c));
+  let h;
+  if(x<0){ h=8+((x+15)/15)*134; }    // -15c: 8 (red)  ->  0c: 142 (green)
+  else   { h=142+(x/15)*70;     }    //  0c: 142 (green) -> +15c: 212 (blue)
+  return 'hsl('+Math.round(h)+',75%,55%)';
 }
 function fillBar(c){
   // map -50..+50 cents to bar; clamp
@@ -430,7 +438,7 @@ go.addEventListener('click', async ()=>{
 });
 
 const VERDICT_COLORS={green:'var(--ok)', yellow:'#ffc14d', red:'#ff5d5d', none:'var(--dim)'};
-const VERDICT_DOTS={green:'\u{1F7E2}', yellow:'\u{1F7E1}', red:'\u{1F534}', none:'\u26AA'};
+const VERDICT_DOTS={green:'\u{1F7E2}', yellow:'\u{1F7E1}', red:'\u{1F534}', none:'⚪'};
 
 function render(data){
   const s=data.summary||{};
@@ -450,13 +458,16 @@ function render(data){
   if(s.missing_notes && s.missing_notes.length){
     html+=' · <span class="warn">missing: '+s.missing_notes.join(', ')+'</span>';
   }
-  if(s.rejected_blobs){ html+=' · '+s.rejected_blobs+' noise blob(s) ignored'; }
+  if(s.rejected_blobs){ html+=' · '+s.rejected_blobs+' sound(s) didn\'t match a note and were skipped'; }
   html+='<br><span style="font-size:12px">Measures overall pitch level only — unison and fine-tuning quality can\'t be judged by this test.</span>';
   const presetNames={spinet:'Console / Spinet',standard:'Standard — grands & uprights'};
   html+='<br>Stretch curve: '+(presetNames[s.preset]||s.preset);
   if(s.a4 && s.a4!==440){ html+=' · A4 = '+s.a4+' Hz'; }
   html+='</div></div>';
 
+  if((data.notes||[]).length){
+    html+='<div class="legend"><span>◀ flat (red)</span><span>on target (green)</span><span>sharp (blue) ▶</span></div>';
+  }
   html+='<div class="results">';
   (data.notes||[]).forEach(n=>{
     const c=n.cents_from_stretch;
@@ -525,7 +536,11 @@ document.getElementById('srcToggle').addEventListener('click',()=>{
 
 const LIVE_LABELS=['A2','A3','A4','A5','A6'];
 const LIVE_MIDI={A2:45,A3:57,A4:69,A5:81,A6:93};
-const FFT_NOTES={A5:1,A6:1};          // bass/mid use autocorrelation; treble uses FFT peak
+const FFT_NOTES={A3:1,A4:1,A5:1,A6:1};// A3+ read the fundamental FFT peak directly
+                                      // (autocorrelation reads inharmonic piano
+                                      // tones a few cents sharp). A2 keeps
+                                      // autocorrelation: robust when the
+                                      // fundamental is weak on phone mics.
 const LIVE_BAND=280;                  // cents search window around expected pitch
 // stretch curves must mirror app.py
 const LIVE_STRETCH={
@@ -533,6 +548,15 @@ const LIVE_STRETCH={
   standard:{A2:-4.0,A3:-2.0,A4:0.0,A5:3.4,A6:10.5}
 };
 const LIVE_WEIGHTS={A2:1,A3:1,A4:1,A5:1,A6:0.5};
+
+// Live capture tuning. The first ~0.27s of a piano tone is hammer/attack
+// junk (broadband noise, longitudinal modes) — never measure it. After the
+// attack, readings must agree before capture; hysteresis keeps measuring as
+// the note decays so quick-decaying notes (A6) still get captured.
+const ATTACK_TICKS=3;       // ticks (~90ms each) to skip after onset
+const STABLE_N=5;           // readings needed to capture
+const STABLE_CENTS=3.5;     // max spread across those readings
+const DECAY_FRAC=0.45;      // keep measuring down to this fraction of the gate
 
 let AU=null, LV=null;
 
@@ -582,9 +606,14 @@ function detectFFT(buf,sr,fExp){
     if(m>mPk){ mPk=m; kPk=k; }
   }
   if(mPk<=0) return null;
+  // log-magnitude parabolic interpolation (much more accurate than linear)
   const mag=k=>Math.sqrt(re[k]*re[k]+im[k]*im[k]);
-  const a=mag(kPk-1), b=mag(kPk), c=mag(kPk+1), den=a-2*b+c;
-  const kf=den!==0 ? kPk+0.5*(a-c)/den : kPk;
+  const a=mag(kPk-1), b=mag(kPk), c=mag(kPk+1);
+  let kf=kPk;
+  if(a>0&&b>0&&c>0){
+    const la=Math.log(a), lb=Math.log(b), lc=Math.log(c), den=la-2*lb+lc;
+    if(den!==0) kf=kPk+0.5*(la-lc)/den;
+  }
   return kf/nfft*sr;
 }
 function detectAC(buf,sr,fExp){
@@ -608,7 +637,7 @@ function detectAC(buf,sr,fExp){
     r[tau]=nr;
     if(nr>bestR){ bestR=nr; best=tau; }
   }
-  if(bestR<0.5) return null;            // not periodic enough
+  if(bestR<0.4) return null;            // not periodic enough
   let tf=best;
   if(best>tauMin && best<tauMax){
     const a=r[best-1], b=r[best], c=r[best+1], den=a-2*b+c;
@@ -650,7 +679,8 @@ async function startLive(){
     alert('Microphone unavailable ('+e.message+'). Use "Upload a file" instead.');
     AU=null; return;
   }
-  LV={slot:0, phase:'listen', status:{}, stable:[], quiet:0, noise:0.0008, timer:null};
+  LV={slot:0, phase:'listen', status:{}, stable:[], quiet:0, attack:0,
+      noise:0.0008, timer:null};
   document.getElementById('liveStart').style.display='none';
   document.getElementById('liveUI').style.display='block';
   out.innerHTML='';
@@ -688,7 +718,23 @@ function liveTick(){
   }
   const L=LIVE_LABELS[LV.slot];
   if(!L) return;
-  if(rms<=gate){ return; }
+
+  // listen: wait for a note onset, then skip the attack before measuring
+  if(LV.phase==='listen'){
+    if(rms>gate){ LV.phase='attack'; LV.attack=0; LV.stable=[]; liveUIupdate('…'); }
+    return;
+  }
+  if(LV.phase==='attack'){
+    if(rms<gate*DECAY_FRAC){ LV.phase='listen'; liveUIupdate('listening…'); return; } // false trigger
+    if(++LV.attack>=ATTACK_TICKS){ LV.phase='measure'; }
+    return;
+  }
+
+  // measure: hysteresis — keep going while the note decays, down to DECAY_FRAC
+  if(rms<gate*DECAY_FRAC){
+    LV.phase='listen'; LV.stable=[]; liveUIupdate('listening…');
+    return;
+  }
   const a4=parseFloat(a4ref.value)||440;
   const fExp=noteET(L,a4);
   const f=FFT_NOTES[L]? detectFFT(AU.buf,sr,fExp) : detectAC(AU.buf,sr,fExp);
@@ -696,13 +742,12 @@ function liveTick(){
   const cents=Math.round(12000*Math.log2(f/liveTarget(L)))/10;
   liveUIupdate((cents>0?'+':'')+cents.toFixed(1)+'¢');
   LV.stable.push(f);
-  if(LV.stable.length>6) LV.stable.shift();
-  if(LV.stable.length===6){
+  if(LV.stable.length>STABLE_N) LV.stable.shift();
+  if(LV.stable.length===STABLE_N){
     const cs=LV.stable.map(x=>1200*Math.log2(x/fExp));
-    if(Math.max(...cs)-Math.min(...cs)<=3.0){
+    if(Math.max(...cs)-Math.min(...cs)<=STABLE_CENTS){
       const sorted=[...LV.stable].sort((a,b)=>a-b);
-      const med=(sorted[2]+sorted[3])/2;
-      captureNote(L, med);
+      captureNote(L, sorted[(STABLE_N-1)>>1]);   // median
     }
   }
 }

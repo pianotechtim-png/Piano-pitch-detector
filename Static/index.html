@@ -199,7 +199,6 @@
       <div class="lr" id="liveReading">listening…</div>
       <div class="lvl"><div id="lvlFill"></div></div>
     </div>
-    <button class="btn2 solid" id="liveCapture" style="margin-top:10px">Capture this note now</button>
     <div class="liverow" style="margin-top:10px">
       <button class="btn2" id="liveSkip">Skip note</button>
       <button class="btn2" id="liveStop">Cancel</button>
@@ -559,14 +558,10 @@ const LIVE_WEIGHTS={A2:1,A3:1,A4:1,A5:1,A6:0.5};
 // junk (broadband noise, longitudinal modes) — never measure it. After the
 // attack, readings must agree before capture; hysteresis keeps measuring as
 // the note decays so quick-decaying notes (A6) still get captured.
-// Live capture tuning (see liveTick). Bass settles slowly -> skip more attack;
-// treble is short & quiet -> skip almost none, poll fast, and measure the LEVEL
-// on a recent window so it isn't averaged away by the long analysis buffer
-// (the main reason high notes failed to register next to a real piano).
-const LIVE_TICK_MS=55;       // polling interval (more reads during short treble notes)
-const LIVE_LEVEL_WIN=4096;   // samples (~93ms) used for the level / onset gate
-const LIVE_TREBLE_WIN=8192;  // samples (~186ms) FFT window for A5/A6
-const DECAY_FRAC=0.35;       // keep measuring down to this fraction of the gate
+const ATTACK_TICKS=3;       // ticks (~90ms each) to skip after onset
+const STABLE_N=5;           // readings needed to capture
+const STABLE_CENTS=3.5;     // max spread across those readings
+const DECAY_FRAC=0.45;      // keep measuring down to this fraction of the gate
 
 let AU=null, LV=null;
 
@@ -695,7 +690,7 @@ async function startLive(){
   document.getElementById('liveUI').style.display='block';
   out.innerHTML='';
   liveUIupdate('listening…');
-  LV.timer=setInterval(liveTick, LIVE_TICK_MS);
+  LV.timer=setInterval(liveTick, 90);
 }
 
 function stopLive(finish){
@@ -715,11 +710,8 @@ function liveTick(){
   if(!AU||!LV) return;
   AU.an.getFloatTimeDomainData(AU.buf);
   const sr=AU.ctx.sampleRate;
-  const N=AU.buf.length, LW=Math.min(LIVE_LEVEL_WIN, N);
-  // LEVEL over a recent window, not the full 371ms buffer: a short, quiet
-  // treble pluck keeps a high recent RMS instead of being diluted below the gate.
-  let s=0; for(let i=N-LW;i<N;i++) s+=AU.buf[i]*AU.buf[i];
-  const rms=Math.sqrt(s/LW);
+  let s=0; for(let i=0;i<AU.buf.length;i++) s+=AU.buf[i]*AU.buf[i];
+  const rms=Math.sqrt(s/AU.buf.length);
   const gate=Math.max(LV.noise*5, 0.0035);
   if(rms<gate) LV.noise=0.97*LV.noise+0.03*rms;     // track noise floor while quiet
   document.getElementById('lvlFill').style.width=Math.min(100,rms/gate*40)+'%';
@@ -731,7 +723,6 @@ function liveTick(){
   }
   const L=LIVE_LABELS[LV.slot];
   if(!L) return;
-  const treble=(L==='A5'||L==='A6');
 
   // listen: wait for a note onset, then skip the attack before measuring
   if(LV.phase==='listen'){
@@ -740,50 +731,29 @@ function liveTick(){
   }
   if(LV.phase==='attack'){
     if(rms<gate*DECAY_FRAC){ LV.phase='listen'; liveUIupdate('listening…'); return; } // false trigger
-    // bass: skip ~275ms (its low fundamental + attack settle slowly); treble: skip ~55ms
-    if(++LV.attack >= (treble?1:5)){ LV.phase='measure'; }
+    if(++LV.attack>=ATTACK_TICKS){ LV.phase='measure'; }
     return;
   }
 
-  // measure
-  const ending = rms<gate*DECAY_FRAC;
+  // measure: hysteresis — keep going while the note decays, down to DECAY_FRAC
+  if(rms<gate*DECAY_FRAC){
+    LV.phase='listen'; LV.stable=[]; liveUIupdate('listening…');
+    return;
+  }
   const a4=parseFloat(a4ref.value)||440;
   const fExp=noteET(L,a4);
-  let f;
-  if(treble){
-    const W=Math.min(LIVE_TREBLE_WIN, N);
-    f=detectFFT(AU.buf.subarray(N-W), sr, fExp);   // recent window: less decay smear
-  } else {
-    f = FFT_NOTES[L] ? detectFFT(AU.buf,sr,fExp) : detectAC(AU.buf,sr,fExp);
-  }
-  if(f && isFinite(f) && f>0){
-    const cents=Math.round(12000*Math.log2(f/liveTarget(L)))/10;
-    liveUIupdate((cents>0?'+':'')+cents.toFixed(1)+'¢');
-    LV.lastF=f;                                     // remembered for manual capture
-    LV.stable.push(f);
-    if(LV.stable.length>8) LV.stable.shift();
-    // bass: strict 5-read run for accuracy; treble: quick 3-read (it decays fast)
-    const need=treble?3:5, spread=treble?4.5:3.5;
-    if(LV.stable.length>=need){
-      const cs=LV.stable.slice(-need).map(x=>1200*Math.log2(x/fExp));
-      if(Math.max(...cs)-Math.min(...cs)<=spread){
-        const run=LV.stable.slice(-need).sort((a,b)=>a-b);
-        captureNote(L, run[(need-1)>>1]); return;   // median
-      }
+  const f=FFT_NOTES[L]? detectFFT(AU.buf,sr,fExp) : detectAC(AU.buf,sr,fExp);
+  if(!f||!isFinite(f)||f<=0){ liveUIupdate('…'); return; }
+  const cents=Math.round(12000*Math.log2(f/liveTarget(L)))/10;
+  liveUIupdate((cents>0?'+':'')+cents.toFixed(1)+'¢');
+  LV.stable.push(f);
+  if(LV.stable.length>STABLE_N) LV.stable.shift();
+  if(LV.stable.length===STABLE_N){
+    const cs=LV.stable.map(x=>1200*Math.log2(x/fExp));
+    if(Math.max(...cs)-Math.min(...cs)<=STABLE_CENTS){
+      const sorted=[...LV.stable].sort((a,b)=>a-b);
+      captureNote(L, sorted[(STABLE_N-1)>>1]);   // median
     }
-  } else {
-    liveUIupdate('…');
-  }
-  if(ending){
-    // fast-decaying treble that couldn't reach a full run: salvage a looser one
-    if(treble && LV.stable.length>=3){
-      const cs=LV.stable.slice(-3).map(x=>1200*Math.log2(x/fExp));
-      if(Math.max(...cs)-Math.min(...cs)<=6.0){
-        const run=LV.stable.slice(-3).sort((a,b)=>a-b);
-        captureNote(L, run[1]); return;
-      }
-    }
-    LV.phase='listen'; LV.stable=[]; liveUIupdate('listening…');
   }
 }
 
@@ -831,12 +801,6 @@ function finishLive(){
 
 document.getElementById('liveStart').addEventListener('click', startLive);
 document.getElementById('liveStop').addEventListener('click', ()=>stopLive(false));
-document.getElementById('liveCapture').addEventListener('click', ()=>{
-  if(!LV) return;
-  const L=LIVE_LABELS[LV.slot]; if(!L) return;
-  if(LV.lastF && isFinite(LV.lastF) && LV.lastF>0) captureNote(L, LV.lastF);
-  else liveUIupdate('play the note, then tap capture');
-});
 document.getElementById('liveSkip').addEventListener('click', ()=>{
   if(!LV) return;
   const L=LIVE_LABELS[LV.slot];

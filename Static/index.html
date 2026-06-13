@@ -193,15 +193,13 @@
 <div id="livePanel">
   <button class="analyze" id="liveStart" style="margin-top:12px">🎤 Start listening</button>
   <div id="liveUI" style="display:none">
-    <div class="chips" id="liveChips"></div>
     <div class="livebox">
-      <div class="lp" id="livePrompt">Play A2</div>
-      <div class="lr" id="liveReading">listening…</div>
+      <div class="lp" id="liveNote">—</div>
+      <div class="lr" id="liveReading">play a note…</div>
       <div class="lvl"><div id="lvlFill"></div></div>
     </div>
     <div class="liverow" style="margin-top:10px">
-      <button class="btn2" id="liveSkip">Skip note</button>
-      <button class="btn2" id="liveStop">Cancel</button>
+      <button class="btn2" id="liveStop">Stop</button>
     </div>
   </div>
   <div class="status" style="margin-top:8px">Audio is analyzed on your device — nothing is uploaded.</div>
@@ -651,22 +649,53 @@ function detectAC(buf,sr,fExp){
   return sr/tf;
 }
 
-// ---- live session state machine ----
-function chipHTML(){
-  return LIVE_LABELS.map((L,i)=>{
-    const st=LV.status[L];
-    let cls='chip'; let cc='';
-    if(st&&st.done){ cls+=' done'; cc=(st.cents>0?'+':'')+st.cents+'¢'; }
-    else if(st&&st.skipped){ cls+=' skip'; cc='skipped'; }
-    else if(i===LV.slot){ cls+=' cur'; cc='now'; }
-    return '<div class="'+cls+'">'+L+'<span class="cc">'+cc+'</span></div>';
-  }).join('');
+// ---- simple always-on tuner readout (no slots, no capture) -------------
+// Shows the nearest note + cents continuously for whatever is playing. This
+// replaced a brittle slot-by-slot capture flow that often displayed nothing
+// because a reading had to clear several gates before it would show.
+const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+// General pitch detector: normalized autocorrelation across the whole piano
+// range. No expected frequency needed -- it reports whatever note sounds.
+function detectPitch(buf, sr){
+  const W=Math.min(8192, buf.length);          // recent slice: enough cycles even for A2
+  const o=buf.length-W;
+  let mean=0; for(let i=0;i<W;i++) mean+=buf[o+i]; mean/=W;
+  const fmin=26, fmax=4600;
+  const tauMin=Math.max(2,Math.floor(sr/fmax));
+  const tauMax=Math.min(W>>1,Math.ceil(sr/fmin));
+  if(tauMax<=tauMin+2) return null;
+  const M=W-tauMax;
+  let e0=0; for(let i=0;i<M;i++){ const v=buf[o+i]-mean; e0+=v*v; }
+  if(e0<1e-9) return null;
+  const r=new Float64Array(tauMax+1);
+  let bestR=0;
+  for(let tau=tauMin;tau<=tauMax;tau++){
+    let s=0,e1=0;
+    for(let i=0;i<M;i++){ const a=buf[o+i]-mean, b=buf[o+i+tau]-mean; s+=a*b; e1+=b*b; }
+    const nr=e1>1e-9 ? s/Math.sqrt(e0*e1) : 0; r[tau]=nr; if(nr>bestR) bestR=nr;
+  }
+  if(bestR<0.45) return null;                   // not clearly periodic
+  // Pick the FIRST strong peak (shortest period), not the global max -- the
+  // global max often lands on 2x/3x the true period, which reads an octave
+  // (or two) too low. The fundamental is the earliest peak near the max.
+  const thr=bestR*0.90;
+  let best=-1;
+  for(let tau=tauMin+1; tau<tauMax; tau++){
+    if(r[tau]>=thr && r[tau]>=r[tau-1] && r[tau]>=r[tau+1]){ best=tau; break; }
+  }
+  if(best<0){ best=tauMin; for(let tau=tauMin;tau<=tauMax;tau++) if(r[tau]>r[best]) best=tau; }
+  let tf=best;
+  if(best>tauMin && best<tauMax){ const a=r[best-1],b=r[best],c=r[best+1],den=a-2*b+c; if(den!==0) tf=best+0.5*(a-c)/den; }
+  return sr/tf;
 }
-function liveUIupdate(reading){
-  document.getElementById('liveChips').innerHTML=chipHTML();
-  const L=LIVE_LABELS[LV.slot];
-  document.getElementById('livePrompt').textContent = L ? 'Play '+L : 'Done';
-  if(reading!==undefined) document.getElementById('liveReading').textContent=reading;
+function nearestNote(f, a4){
+  const midi=Math.round(69 + 12*Math.log2(f/a4));
+  const target=a4*Math.pow(2,(midi-69)/12);
+  const cents=1200*Math.log2(f/target);
+  const name=NOTE_NAMES[((midi%12)+12)%12];
+  const octave=Math.floor(midi/12)-1;
+  return {name:name+octave, cents:cents};
 }
 
 async function startLive(){
@@ -681,133 +710,60 @@ async function startLive(){
     node.connect(AU.an);
     AU.buf=new Float32Array(AU.an.fftSize);
   }catch(e){
-    alert('Microphone unavailable ('+e.message+'). Use "Upload a file" instead.');
+    alert('Microphone unavailable ('+e.message+'). Use the upload option instead.');
     AU=null; return;
   }
-  LV={slot:0, phase:'listen', status:{}, stable:[], quiet:0, attack:0,
-      noise:0.0008, timer:null};
+  LV={hist:[], timer:null};
   document.getElementById('liveStart').style.display='none';
   document.getElementById('liveUI').style.display='block';
   out.innerHTML='';
-  liveUIupdate('listening…');
-  LV.timer=setInterval(liveTick, 90);
+  document.getElementById('liveNote').textContent='—';
+  document.getElementById('liveReading').textContent='play a note…';
+  LV.timer=setInterval(tunerTick, 80);
 }
 
-function stopLive(finish){
+function stopLive(){
   if(LV&&LV.timer){ clearInterval(LV.timer); LV.timer=null; }
   if(AU){
     try{ AU.stream.getTracks().forEach(t=>t.stop()); }catch(e){}
     try{ AU.ctx.close(); }catch(e){}
     AU=null;
   }
+  LV=null;
   document.getElementById('liveStart').style.display='block';
   document.getElementById('liveUI').style.display='none';
-  if(finish && LV) finishLive();
-  if(!finish) LV=null;
 }
 
-function liveTick(){
+function tunerTick(){
   if(!AU||!LV) return;
   AU.an.getFloatTimeDomainData(AU.buf);
-  const sr=AU.ctx.sampleRate;
-  let s=0; for(let i=0;i<AU.buf.length;i++) s+=AU.buf[i]*AU.buf[i];
-  const rms=Math.sqrt(s/AU.buf.length);
-  const gate=Math.max(LV.noise*5, 0.0035);
-  if(rms<gate) LV.noise=0.97*LV.noise+0.03*rms;     // track noise floor while quiet
-  document.getElementById('lvlFill').style.width=Math.min(100,rms/gate*40)+'%';
-
-  if(LV.phase==='waitQuiet'){
-    if(rms<gate*0.7){ if(++LV.quiet>=4){ LV.phase='listen'; LV.stable=[]; liveUIupdate('listening…'); } }
-    else LV.quiet=0;
-    return;
-  }
-  const L=LIVE_LABELS[LV.slot];
-  if(!L) return;
-
-  // listen: wait for a note onset, then skip the attack before measuring
-  if(LV.phase==='listen'){
-    if(rms>gate){ LV.phase='attack'; LV.attack=0; LV.stable=[]; liveUIupdate('…'); }
-    return;
-  }
-  if(LV.phase==='attack'){
-    if(rms<gate*DECAY_FRAC){ LV.phase='listen'; liveUIupdate('listening…'); return; } // false trigger
-    if(++LV.attack>=ATTACK_TICKS){ LV.phase='measure'; }
-    return;
-  }
-
-  // measure: hysteresis — keep going while the note decays, down to DECAY_FRAC
-  if(rms<gate*DECAY_FRAC){
-    LV.phase='listen'; LV.stable=[]; liveUIupdate('listening…');
-    return;
-  }
+  const sr=AU.ctx.sampleRate, N=AU.buf.length;
+  const LW=Math.min(4096,N);
+  let s=0; for(let i=N-LW;i<N;i++) s+=AU.buf[i]*AU.buf[i];
+  const rms=Math.sqrt(s/LW);
+  document.getElementById('lvlFill').style.width=Math.min(100,rms/0.05*100)+'%';
+  const noteEl=document.getElementById('liveNote');
+  const readEl=document.getElementById('liveReading');
+  if(rms<0.002){ readEl.textContent='play a note…'; return; }     // essentially silent
+  let f=detectPitch(AU.buf, sr);
+  if(!f||!isFinite(f)||f<=0){ readEl.textContent='listening…'; return; }
+  // autocorrelation finds the right octave but is coarse up high; refine the
+  // exact frequency with the nearby FFT peak (same trick the upload path uses).
+  const fr=detectFFT(AU.buf, sr, f);
+  if(fr&&isFinite(fr)&&fr>0&&Math.abs(1200*Math.log2(fr/f))<150) f=fr;
+  LV.hist.push(f); if(LV.hist.length>3) LV.hist.shift();           // light smoothing
+  const sorted=[...LV.hist].sort((a,b)=>a-b);
+  const fm=sorted[(sorted.length-1)>>1];                          // median of last 3
   const a4=parseFloat(a4ref.value)||440;
-  const fExp=noteET(L,a4);
-  const f=FFT_NOTES[L]? detectFFT(AU.buf,sr,fExp) : detectAC(AU.buf,sr,fExp);
-  if(!f||!isFinite(f)||f<=0){ liveUIupdate('…'); return; }
-  const cents=Math.round(12000*Math.log2(f/liveTarget(L)))/10;
-  liveUIupdate((cents>0?'+':'')+cents.toFixed(1)+'¢');
-  LV.stable.push(f);
-  if(LV.stable.length>STABLE_N) LV.stable.shift();
-  if(LV.stable.length===STABLE_N){
-    const cs=LV.stable.map(x=>1200*Math.log2(x/fExp));
-    if(Math.max(...cs)-Math.min(...cs)<=STABLE_CENTS){
-      const sorted=[...LV.stable].sort((a,b)=>a-b);
-      captureNote(L, sorted[(STABLE_N-1)>>1]);   // median
-    }
-  }
-}
-
-function captureNote(L, f){
-  const c=Math.round(12000*Math.log2(f/liveTarget(L)))/10;
-  LV.status[L]={done:true, freq:f, cents:c};
-  LV.slot++; LV.stable=[]; LV.quiet=0; LV.phase='waitQuiet';
-  liveUIupdate('✓ '+L+' captured');
-  if(LV.slot>=LIVE_LABELS.length) stopLive(true);
-  else liveUIupdate();
-}
-
-function finishLive(){
-  const a4=parseFloat(a4ref.value)||440;
-  const notes=[]; const missing=[];
-  let ws=0, sum=0;
-  LIVE_LABELS.forEach(L=>{
-    const st=LV.status[L];
-    if(st&&st.done){
-      const stf=liveTarget(L);
-      notes.push({note_label:L, midi:LIVE_MIDI[L], core:true,
-        freq_measured:Math.round(st.freq*1000)/1000,
-        freq_stretched:Math.round(stf*1000)/1000,
-        cents_from_stretch:st.cents});
-      ws+=LIVE_WEIGHTS[L]; sum+=LIVE_WEIGHTS[L]*st.cents;
-    } else missing.push(L);
-  });
-  let wavg=null, verdict='none', vlabel='Not enough core notes for a verdict';
-  if(notes.length>=3){
-    wavg=Math.round(sum/ws*10)/10;
-    if(Math.abs(wavg)<=2){ verdict='green'; vlabel='On pitch — fine tuning may still help'; }
-    else if(Math.abs(wavg)<=15){ verdict='yellow'; vlabel='Tuning recommended'; }
-    else { verdict='red'; vlabel= wavg<0?'Pitch raise recommended':'Pitch correction recommended'; }
-  }
-  const devs=notes.map(n=>n.cents_from_stretch);
-  render({notes:notes, count:notes.length, summary:{
-    notes_detected:notes.length, core_notes_detected:notes.length,
-    missing_notes:missing, rejected_blobs:0,
-    avg_cents_from_stretch: devs.length?Math.round(devs.reduce((a,b)=>a+b,0)/devs.length*10)/10:null,
-    weighted_avg_cents:wavg, verdict:verdict, verdict_label:vlabel,
-    preset:preset, a4:a4
-  }});
-  LV=null;
+  const nn=nearestNote(fm,a4);
+  const c=Math.round(nn.cents*10)/10;
+  noteEl.textContent=nn.name;
+  noteEl.style.color=centsColor(c);
+  readEl.textContent=(c>0?'+':'')+c.toFixed(1)+'\u00A2 \u00B7 '+fm.toFixed(1)+' Hz';
 }
 
 document.getElementById('liveStart').addEventListener('click', startLive);
-document.getElementById('liveStop').addEventListener('click', ()=>stopLive(false));
-document.getElementById('liveSkip').addEventListener('click', ()=>{
-  if(!LV) return;
-  const L=LIVE_LABELS[LV.slot];
-  if(L) LV.status[L]={skipped:true};
-  LV.slot++; LV.stable=[]; LV.quiet=0; LV.phase='waitQuiet';
-  if(LV.slot>=LIVE_LABELS.length) stopLive(true); else liveUIupdate('listening…');
-});
+document.getElementById('liveStop').addEventListener('click', stopLive);
 
 // ==== PWA (Phase 3) ====
 if('serviceWorker' in navigator){

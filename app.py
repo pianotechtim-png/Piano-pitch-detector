@@ -40,6 +40,12 @@ NOMINAL_A = {21:27.5, 33:55.0, 45:110.0, 57:220.0, 69:440.0,
              81:880.0, 93:1760.0, 105:3520.0}
 HARMONIC_NOTES = {21, 33, 45}   # use harmonic method (weak fundamental)
 
+# The first part of a piano tone is hammer/attack junk (broadband noise,
+# longitudinal string modes) -- never measure it. Skip into the sustain, then
+# analyze a longer window (better bass resolution: 0.6s of A1 = ~33 cycles).
+ATTACK_SKIP_S = 0.18
+ANALYSIS_WIN_S = 0.60
+
 def nearest_a(freq):
     best, best_c = None, None
     for midi, nom in NOMINAL_A.items():
@@ -122,15 +128,29 @@ def yin_pitch(seg, sr, fmin, fmax, thresh=0.15):
     return sr / tau_est
 
 def _parabolic(spec, k):
+    """Refine a spectral peak position. Interpolates on LOG magnitude --
+    far more accurate for windowed sinusoids than linear interpolation."""
     if k <= 0 or k >= len(spec) - 1:
         return k
     a, b, c = spec[k - 1], spec[k], spec[k + 1]
+    if a > 0 and b > 0 and c > 0:
+        a, b, c = np.log(a), np.log(b), np.log(c)
     den = (a - 2 * b + c)
     return k + 0.5 * (a - c) / den if den != 0 else k
 
-def harmonic_f0(seg, sr, f0_expected, n_search=12):
+def harmonic_f0(seg, sr, f0_seed, n_max=14):
+    """Bass fundamental from its partials (the ETD way: measure what's loud,
+    not the weak/inaudible fundamental).
+
+    Seeded with the ROUGH MEASURED pitch, not nominal ET, so a piano 50c+
+    flat keeps its partials inside the search windows. Piano partials are
+    inharmonic (f_n = n*f1*sqrt(1+B*n^2), sharp of n*f1), so with >=4 partials
+    we fit B directly:  (f_n/n)^2 = f1^2 + (f1^2*B)*n^2  is linear in n^2.
+    The intercept gives an inharmonicity-corrected fundamental. Falls back to
+    an amplitude-weighted median of implied fundamentals when the fit can't
+    be trusted."""
     seg = seg.astype(np.float64); seg = seg - np.mean(seg)
-    if np.max(np.abs(seg)) < 1e-6:
+    if f0_seed is None or f0_seed <= 0 or np.max(np.abs(seg)) < 1e-6:
         return None
     seg = seg * np.hanning(len(seg))
     nfft = 1 << int(np.ceil(np.log2(len(seg) * 4)))
@@ -139,11 +159,13 @@ def harmonic_f0(seg, sr, f0_expected, n_search=12):
     if smax <= 0:
         return None
     found = []
-    for n in range(2, n_search + 1):
-        target = n * f0_expected
+    for n in range(2, n_max + 1):
+        target = n * f0_seed
         if target > sr / 2 - 50:
             break
-        lo, hi = target * 0.97, target * 1.06
+        # +-45c seed tolerance, plus sharp headroom for inharmonicity
+        lo = target * (2 ** (-45 / 1200.0))
+        hi = target * (2 ** (45 / 1200.0)) * np.sqrt(1 + 0.001 * n * n)
         klo, khi = int(lo / sr * nfft), int(hi / sr * nfft)
         if khi <= klo or khi >= len(spec):
             continue
@@ -151,17 +173,65 @@ def harmonic_f0(seg, sr, f0_expected, n_search=12):
         if spec[kpk] < smax * 0.02:
             continue
         fpk = _parabolic(spec, kpk) / nfft * sr
-        found.append((n, fpk))
+        found.append((n, fpk, float(spec[kpk])))
     if len(found) < 3:
         return None
     ns = np.array([f[0] for f in found], dtype=float)
     fs = np.array([f[1] for f in found], dtype=float)
+    am = np.array([f[2] for f in found], dtype=float)
+    if len(found) >= 4:
+        x = ns * ns
+        yv = (fs / ns) ** 2
+        w = np.sqrt(am)                      # trust louder partials more
+        W = np.sum(w)
+        mx = np.sum(w * x) / W
+        my = np.sum(w * yv) / W
+        var = np.sum(w * (x - mx) ** 2)
+        if var > 0:
+            slope = np.sum(w * (x - mx) * (yv - my)) / var
+            intercept = my - slope * mx
+            if intercept > 0:
+                B = slope / intercept
+                f0 = float(np.sqrt(intercept))
+                # sane piano range for B; result must agree with the seed
+                if -1e-5 <= B <= 0.004 and \
+                   abs(1200.0 * np.log2(f0 / f0_seed)) < 150:
+                    return f0
+    # Fallback: amplitude-weighted median of f_n/n, favoring low partials
+    # (least inharmonic). Slight sharp bias, but robust.
     implied = fs / ns
-    w = 1.0 / ns
+    w = am / ns
     order = np.argsort(implied)
-    implied_s, w_s = implied[order], w[order]
-    cw = np.cumsum(w_s)
-    return float(implied_s[np.searchsorted(cw, cw[-1] / 2)])
+    cw = np.cumsum(w[order])
+    return float(implied[order][np.searchsorted(cw, cw[-1] / 2)])
+
+def fundamental_fft(seg, sr, rough, search_cents=60):
+    """Measure the FUNDAMENTAL partial directly as a spectral peak near the
+    rough estimate. YIN on an inharmonic piano tone reads a few cents SHARP
+    (sharp upper partials pull the periodicity compromise); the fundamental
+    peak itself doesn't lie."""
+    seg = seg.astype(np.float64); seg = seg - np.mean(seg)
+    if rough is None or rough <= 0 or np.max(np.abs(seg)) < 1e-7:
+        return None
+    seg = seg * np.hanning(len(seg))
+    nfft = 1 << int(np.ceil(np.log2(max(len(seg), 1) * 8)))
+    spec = np.abs(np.fft.rfft(seg, nfft))
+    lo = rough * 2 ** (-search_cents / 1200.0)
+    hi = rough * 2 ** (search_cents / 1200.0)
+    klo, khi = int(lo / sr * nfft), min(int(hi / sr * nfft), len(spec) - 2)
+    if khi <= klo:
+        return None
+    kpk = klo + int(np.argmax(spec[klo:khi]))
+    if spec[kpk] <= 0:
+        return None
+    return _parabolic(spec, kpk) / nfft * sr
+
+def refined_mid_pitch(seg, sr, rough):
+    """A3-A5: fundamental is strong on phone recordings up here -- measure
+    that peak directly (no YIN inharmonicity bias, no octave hops since the
+    search window is locked to the rough estimate)."""
+    f = fundamental_fft(seg, sr, rough)
+    return f if (f and np.isfinite(f)) else rough
 
 TREBLE_NOTES = {93, 105}   # A6, A7: YIN octave-errors here; use direct FFT peak
 TREBLE_MAX_MIDI = 105        # highest slot; A7
@@ -184,13 +254,11 @@ def treble_fft_pitch(seg, sr, f_expected, search_cents=200):
         return None
     idx = np.where(band)[0]
     kpk = idx[int(np.argmax(spec[idx]))]
-    if 0 < kpk < len(spec) - 1:
-        a, b, c = spec[kpk - 1], spec[kpk], spec[kpk + 1]
-        den = (a - 2 * b + c)
-        kf = kpk + 0.5 * (a - c) / den if den != 0 else kpk
-    else:
-        kf = kpk
-    return kf / nfft * sr
+    # The peak must actually stand out in the whole spectrum, otherwise any
+    # broadband noise blob would "find" a peak in every band it's probed for.
+    if spec[kpk] < 0.05 * np.max(spec):
+        return None
+    return _parabolic(spec, kpk) / nfft * sr
 
 def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
     sr, y = load_wav_mono(audio_path)
@@ -247,26 +315,31 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
     max_e = max((e['energy'] for e in events), default=1.0) or 1.0
 
     # --- Measure each blob's rough pitch (no labels yet) ---
+    # Skip the attack transient, then analyze a long sustain window. Blobs
+    # where YIN finds no period are KEPT (rough=None): a quiet A6/A7 can fail
+    # YIN yet still show a clean spectral peak for the treble FFT probe.
     blobs = []  # {rough, energy, time, dur, seg}
     for ev in events:
         seg_full = y[ev['start']:ev['end']]
         L = len(seg_full)
-        seg = seg_full[L // 4: L // 4 + min(int(sr * 0.30), L - L // 4)]
+        skip = min(int(sr * ATTACK_SKIP_S), L // 3)
+        seg = seg_full[skip: skip + int(sr * ANALYSIS_WIN_S)]
         if len(seg) < 256:
             seg = seg_full
         rough = yin_pitch(seg, sr, 20, 3800)
-        if rough is None or not np.isfinite(rough) or rough <= 0:
-            continue
-        blobs.append({'rough': float(rough), 'energy': ev['energy'],
+        if rough is not None and (not np.isfinite(rough) or rough <= 0):
+            rough = None
+        blobs.append({'rough': (float(rough) if rough else None),
+                      'energy': ev['energy'],
                       'time': ev['time'], 'dur': ev['dur'], 'seg': seg})
 
     # --- Order-aware assignment ---------------------------------------------
-    # Clients play A0..A7 low->high in order. We exploit that: walk the blobs in
-    # time order and the A-slots in pitch order together. A blob is accepted into
-    # the current A-slot if it is plausibly that note -- allowing it to be VERY
-    # flat (or sharp) -- WITHOUT requiring it to be the literal nearest A. This
-    # lets a note sit 150c+ flat and still be identified, while still rejecting
-    # true garbage (sounds that fit no upcoming slot within a wide tolerance).
+    # Clients play the A's low->high in order. We exploit that: walk the blobs
+    # in time order and the A-slots in pitch order together. A blob is accepted
+    # into the current A-slot if it is plausibly that note -- allowing it to be
+    # VERY flat (or sharp) -- WITHOUT requiring it to be the literal nearest A.
+    # This lets a note sit 150c+ flat and still be identified, while still
+    # rejecting true garbage (sounds that fit no upcoming slot).
     #
     # ACCEPT_CENTS: how far from a slot's ET pitch a blob may sit and still be
     # that note. Wide enough for badly neglected pianos, but bounded so a random
@@ -295,8 +368,10 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
                     # no peak in this slot's band; let a later treble slot try,
                     # but only if the rough pitch isn't clearly a lower note.
                     rough = b['rough']
-                    if rough > 0 and 1200.0 * np.log2(rough / et) < -ACCEPT_CENTS \
+                    if rough and 1200.0 * np.log2(rough / et) < -ACCEPT_CENTS \
                        and midi != TREBLE_MAX_MIDI:
+                        continue
+                    if rough is None and midi != TREBLE_MAX_MIDI:
                         continue
                     break
                 c = 1200.0 * np.log2(f_fft / et)
@@ -306,16 +381,22 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
                     slot = s + 1; placed = True; break
                 continue
 
-            # Non-treble: use rough YIN to seat, refine bass via harmonics.
+            # Non-treble slots need a rough pitch to seat; a no-period blob
+            # can only ever be a treble note (or garbage).
             rough = b['rough']
+            if rough is None:
+                continue
             c = 1200.0 * np.log2(rough / et)
             if c > ACCEPT_CENTS:
                 continue
             if abs(c) <= ACCEPT_CENTS:
                 if midi in HARMONIC_NOTES:
-                    f0 = harmonic_f0(b['seg'], sr, nominal[midi]) or rough
+                    # Measure the partials (loud) instead of the fundamental
+                    # (weak/rolled off on phone mics). Seed with the rough
+                    # MEASURED pitch so flat pianos stay in-window.
+                    f0 = harmonic_f0(b['seg'], sr, rough) or rough
                 else:
-                    f0 = rough
+                    f0 = refined_mid_pitch(b['seg'], sr, rough)
                 assignments[midi] = {'freq': float(f0), 'energy': b['energy'],
                                      'time': b['time'], 'dur': b['dur']}
                 slot = s + 1; placed = True; break
@@ -364,7 +445,7 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
         wsum = sum(w for w, _ in core_pts)
         wavg = round(float(sum(w * c for w, c in core_pts) / wsum), 1)
         if abs(wavg) <= VERDICT_GREEN:
-            verdict, vlabel = 'green', 'On pitch \u2014 fine tuning may still help'
+            verdict, vlabel = 'green', 'On pitch — fine tuning may still help'
         elif abs(wavg) <= VERDICT_RED:
             verdict, vlabel = 'yellow', 'Tuning recommended'
         elif wavg < 0:

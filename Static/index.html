@@ -170,13 +170,13 @@
 <text x="10.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#8b97a6" font-family="-apple-system,Helvetica,Arial,sans-serif">A0</text><text x="150.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#8b97a6" font-family="-apple-system,Helvetica,Arial,sans-serif">A1</text><text x="290.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#b3a8ff" font-family="-apple-system,Helvetica,Arial,sans-serif">A2</text><text x="430.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#b3a8ff" font-family="-apple-system,Helvetica,Arial,sans-serif">A3</text><text x="570.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#b3a8ff" font-family="-apple-system,Helvetica,Arial,sans-serif">A4</text><text x="710.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#b3a8ff" font-family="-apple-system,Helvetica,Arial,sans-serif">A5</text><text x="850.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#b3a8ff" font-family="-apple-system,Helvetica,Arial,sans-serif">A6</text><text x="990.0" y="114" font-size="22" font-weight="700" text-anchor="middle" fill="#8b97a6" font-family="-apple-system,Helvetica,Arial,sans-serif">A7</text>
 </svg>
     <ol>
-      <li>Tap <b>Start listening</b> and allow microphone access.</li>
-      <li>The app asks for one note at a time — play the <b>A</b> it shows and <b>hold it 2–3 seconds</b> until it's captured.</li>
+      <li>Record a <b>video</b> (or voice memo) with your phone.</li>
+      <li>Play the five A's <b>A2 → A6</b>, lowest to highest, one at a time.</li>
+      <li>Hold each note <b>2–3 seconds</b> and leave a <b>short silence</b> between notes — don't rush.</li>
       <li class="warn">Do not use the pedals.</li>
       <li>Record in a <b>quiet room</b>, phone within a few feet of the piano.</li>
-      <li>Each <b>A</b> is the white key <b>between the 2nd and 3rd black keys</b> of the group of three black keys:</li>
+      <li>Then tap below to <b>select the recording</b> and analyze. Each <b>A</b> is the white key <b>between the 2nd and 3rd black keys</b> of the group of three:</li>
     </ol>
-    <span style="color:var(--dim)">Can't record live? Use the upload option at the bottom — record audio or video of A2–A6 played lowest to highest with short silences between notes.</span>
     <svg viewBox="-3 -30 406 194" width="100%" style="max-width:400px;display:block;margin:6px auto 2px;" xmlns="http://www.w3.org/2000/svg">
   <text x="220.0" y="-18" font-size="12" font-weight="700" text-anchor="middle" fill="#9d90ff" font-family="-apple-system,Helvetica,Arial,sans-serif">this is A</text><polygon points="214.0,-8 226.0,-8 220.0,0" fill="#9d90ff"/>
   <rect x="0" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="40" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="80" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="120" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="160" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="200" y="0" width="40" height="132" rx="4" fill="#7c6cff" stroke="#c2c9d6" stroke-width="1.5"/><rect x="240" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="280" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="320" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/><rect x="360" y="0" width="40" height="132" rx="4" fill="#f4f6fb" stroke="#c2c9d6" stroke-width="1.5"/>
@@ -188,24 +188,9 @@
   </div>
 </details>
 
-<p class="label">Recording</p>
+<p class="label">Record A2 – A6, then upload</p>
 
-<div id="livePanel">
-  <button class="analyze" id="liveStart" style="margin-top:12px">🎤 Start listening</button>
-  <div id="liveUI" style="display:none">
-    <div class="livebox">
-      <div class="lp" id="liveNote">—</div>
-      <div class="lr" id="liveReading">play a note…</div>
-      <div class="lvl"><div id="lvlFill"></div></div>
-    </div>
-    <div class="liverow" style="margin-top:10px">
-      <button class="btn2" id="liveStop">Stop</button>
-    </div>
-  </div>
-  <div class="status" style="margin-top:8px">Audio is analyzed on your device — nothing is uploaded.</div>
-</div>
-
-<div id="filePanel" style="display:none">
+<div id="filePanel">
 <div class="drop" id="drop">
   <div class="note">🎵</div>
   <div class="big">Tap to select audio or video file</div>
@@ -219,7 +204,6 @@
 </div>
 <button class="analyze" id="go" disabled>Analyze A2 – A6</button>
 </div>
-<button class="linklike" id="srcToggle">Can't record live? Upload a recording instead</button>
 <div id="a2hs">
   <button class="x" id="a2hsX">✕</button>
   <b>Install as an app:</b> tap the <b>Share</b> button <span style="font-size:16px">⬆️</span>
@@ -526,17 +510,6 @@ function postMonitor(data, reshow){
   if(name && !reshow) addHistory(histEntry);
 }
 
-// ==== LIVE LISTENING (Phase 4) — all analysis on-device =====================
-let usingFile=false;
-document.getElementById('srcToggle').addEventListener('click',()=>{
-  usingFile=!usingFile;
-  document.getElementById('livePanel').style.display=usingFile?'none':'block';
-  document.getElementById('filePanel').style.display=usingFile?'block':'none';
-  document.getElementById('srcToggle').textContent =
-    usingFile ? '🎤 Record live instead' : "Can't record live? Upload a recording instead";
-  if(usingFile) stopLive(false);
-});
-
 const LIVE_LABELS=['A2','A3','A4','A5','A6'];
 const LIVE_MIDI={A2:45,A3:57,A4:69,A5:81,A6:93};
 const FFT_NOTES={A3:1,A4:1,A5:1,A6:1};// A3+ read the fundamental FFT peak directly
@@ -649,121 +622,7 @@ function detectAC(buf,sr,fExp){
   return sr/tf;
 }
 
-// ---- simple always-on tuner readout (no slots, no capture) -------------
-// Shows the nearest note + cents continuously for whatever is playing. This
-// replaced a brittle slot-by-slot capture flow that often displayed nothing
-// because a reading had to clear several gates before it would show.
-const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-
-// General pitch detector: normalized autocorrelation across the whole piano
-// range. No expected frequency needed -- it reports whatever note sounds.
-function detectPitch(buf, sr){
-  const W=Math.min(8192, buf.length);          // recent slice: enough cycles even for A2
-  const o=buf.length-W;
-  let mean=0; for(let i=0;i<W;i++) mean+=buf[o+i]; mean/=W;
-  const fmin=26, fmax=4600;
-  const tauMin=Math.max(2,Math.floor(sr/fmax));
-  const tauMax=Math.min(W>>1,Math.ceil(sr/fmin));
-  if(tauMax<=tauMin+2) return null;
-  const M=W-tauMax;
-  let e0=0; for(let i=0;i<M;i++){ const v=buf[o+i]-mean; e0+=v*v; }
-  if(e0<1e-9) return null;
-  const r=new Float64Array(tauMax+1);
-  let bestR=0;
-  for(let tau=tauMin;tau<=tauMax;tau++){
-    let s=0,e1=0;
-    for(let i=0;i<M;i++){ const a=buf[o+i]-mean, b=buf[o+i+tau]-mean; s+=a*b; e1+=b*b; }
-    const nr=e1>1e-9 ? s/Math.sqrt(e0*e1) : 0; r[tau]=nr; if(nr>bestR) bestR=nr;
-  }
-  if(bestR<0.45) return null;                   // not clearly periodic
-  // Pick the FIRST strong peak (shortest period), not the global max -- the
-  // global max often lands on 2x/3x the true period, which reads an octave
-  // (or two) too low. The fundamental is the earliest peak near the max.
-  const thr=bestR*0.90;
-  let best=-1;
-  for(let tau=tauMin+1; tau<tauMax; tau++){
-    if(r[tau]>=thr && r[tau]>=r[tau-1] && r[tau]>=r[tau+1]){ best=tau; break; }
-  }
-  if(best<0){ best=tauMin; for(let tau=tauMin;tau<=tauMax;tau++) if(r[tau]>r[best]) best=tau; }
-  let tf=best;
-  if(best>tauMin && best<tauMax){ const a=r[best-1],b=r[best],c=r[best+1],den=a-2*b+c; if(den!==0) tf=best+0.5*(a-c)/den; }
-  return sr/tf;
-}
-function nearestNote(f, a4){
-  const midi=Math.round(69 + 12*Math.log2(f/a4));
-  const target=a4*Math.pow(2,(midi-69)/12);
-  const cents=1200*Math.log2(f/target);
-  const name=NOTE_NAMES[((midi%12)+12)%12];
-  const octave=Math.floor(midi/12)-1;
-  return {name:name+octave, cents:cents};
-}
-
-async function startLive(){
-  try{
-    AU={};
-    AU.ctx=new (window.AudioContext||window.webkitAudioContext)();
-    await AU.ctx.resume();
-    AU.stream=await navigator.mediaDevices.getUserMedia({audio:{
-      echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
-    const node=AU.ctx.createMediaStreamSource(AU.stream);
-    AU.an=AU.ctx.createAnalyser(); AU.an.fftSize=16384;
-    node.connect(AU.an);
-    AU.buf=new Float32Array(AU.an.fftSize);
-  }catch(e){
-    alert('Microphone unavailable ('+e.message+'). Use the upload option instead.');
-    AU=null; return;
-  }
-  LV={hist:[], timer:null};
-  document.getElementById('liveStart').style.display='none';
-  document.getElementById('liveUI').style.display='block';
-  out.innerHTML='';
-  document.getElementById('liveNote').textContent='—';
-  document.getElementById('liveReading').textContent='play a note…';
-  LV.timer=setInterval(tunerTick, 80);
-}
-
-function stopLive(){
-  if(LV&&LV.timer){ clearInterval(LV.timer); LV.timer=null; }
-  if(AU){
-    try{ AU.stream.getTracks().forEach(t=>t.stop()); }catch(e){}
-    try{ AU.ctx.close(); }catch(e){}
-    AU=null;
-  }
-  LV=null;
-  document.getElementById('liveStart').style.display='block';
-  document.getElementById('liveUI').style.display='none';
-}
-
-function tunerTick(){
-  if(!AU||!LV) return;
-  AU.an.getFloatTimeDomainData(AU.buf);
-  const sr=AU.ctx.sampleRate, N=AU.buf.length;
-  const LW=Math.min(4096,N);
-  let s=0; for(let i=N-LW;i<N;i++) s+=AU.buf[i]*AU.buf[i];
-  const rms=Math.sqrt(s/LW);
-  document.getElementById('lvlFill').style.width=Math.min(100,rms/0.05*100)+'%';
-  const noteEl=document.getElementById('liveNote');
-  const readEl=document.getElementById('liveReading');
-  if(rms<0.002){ readEl.textContent='play a note…'; return; }     // essentially silent
-  let f=detectPitch(AU.buf, sr);
-  if(!f||!isFinite(f)||f<=0){ readEl.textContent='listening…'; return; }
-  // autocorrelation finds the right octave but is coarse up high; refine the
-  // exact frequency with the nearby FFT peak (same trick the upload path uses).
-  const fr=detectFFT(AU.buf, sr, f);
-  if(fr&&isFinite(fr)&&fr>0&&Math.abs(1200*Math.log2(fr/f))<150) f=fr;
-  LV.hist.push(f); if(LV.hist.length>3) LV.hist.shift();           // light smoothing
-  const sorted=[...LV.hist].sort((a,b)=>a-b);
-  const fm=sorted[(sorted.length-1)>>1];                          // median of last 3
-  const a4=parseFloat(a4ref.value)||440;
-  const nn=nearestNote(fm,a4);
-  const c=Math.round(nn.cents*10)/10;
-  noteEl.textContent=nn.name;
-  noteEl.style.color=centsColor(c);
-  readEl.textContent=(c>0?'+':'')+c.toFixed(1)+'\u00A2 \u00B7 '+fm.toFixed(1)+' Hz';
-}
-
-document.getElementById('liveStart').addEventListener('click', startLive);
-document.getElementById('liveStop').addEventListener('click', stopLive);
+// (Live mic mode removed — the app now uses the record-and-upload flow only.)
 
 // ==== PWA (Phase 3) ====
 if('serviceWorker' in navigator){

@@ -719,7 +719,7 @@ function finishLive(){
   let wavg=null, verdict='none', vlabel='Not enough core notes for a verdict';
   if(notes.length>=3){
     wavg=Math.round(sum/ws*10)/10;
-    if(Math.abs(wavg)<=2){ verdict='green'; vlabel='On pitch — fine tuning may still help'; }
+    if(Math.abs(wavg)<=2){ verdict='yellow'; vlabel='No pitch raise needed — regular tuning recommended'; }
     else if(Math.abs(wavg)<=15){ verdict='yellow'; vlabel='Tuning recommended'; }
     else { verdict='red'; vlabel= wavg<0?'Pitch raise recommended':'Pitch correction recommended'; }
   }

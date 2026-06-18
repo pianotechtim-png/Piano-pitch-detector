@@ -70,13 +70,20 @@ def test_partial_set_only_reports_played_notes(tmp_path):
 # --------------------------------------------------------------------------- #
 # Verdict thresholds (green / yellow / red, and the red sign split)
 # --------------------------------------------------------------------------- #
-def test_verdict_green_when_on_stretched_pitch(tmp_path):
+def test_verdict_near_pitch_reads_yellow_not_green(tmp_path):
     # Tones placed exactly on the standard stretch curve -> ~0 deviation.
+    # Even on-level the piano still needs a tuning, so this must read yellow
+    # and never say "on pitch" -- a reassuring green verdict costs tunings.
     freqs = [app.stretched_target(m, app.STRETCH_PRESETS["standard"][m])
              for m in app.A_MIDI_ORDER]
     _, summary = _detect(tmp_path, build_wav(freqs), preset="standard")
     assert abs(summary["weighted_avg_cents"]) <= app.VERDICT_GREEN
-    assert summary["verdict"] == "green"
+    assert summary["verdict"] == "yellow"
+    assert summary["verdict"] != "green"
+    label = summary["verdict_label"].lower()
+    assert "on pitch" not in label
+    assert "fine tuning" not in label and "fine-tuning" not in label
+    assert "no pitch raise needed" in label
 
 
 def test_verdict_yellow_mild_flat(tmp_path):

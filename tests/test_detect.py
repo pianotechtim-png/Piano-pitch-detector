@@ -90,7 +90,7 @@ def test_verdict_yellow_mild_flat(tmp_path):
     _, summary = _detect(tmp_path, build_wav(_shifted(-10)), preset="standard")
     assert app.VERDICT_GREEN < abs(summary["weighted_avg_cents"]) <= app.VERDICT_RED
     assert summary["verdict"] == "yellow"
-    assert summary["verdict_label"] == "Tuning recommended"
+    assert summary["verdict_label"] == "Tuning recommended, no pitch raise necessary"
 
 
 def test_verdict_red_flat_is_pitch_raise(tmp_path):

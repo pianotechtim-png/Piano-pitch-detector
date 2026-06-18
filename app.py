@@ -451,7 +451,7 @@ def detect_8_a_notes(audio_path, min_gap_ms=300, preset='standard', a4=440.0):
             # still needs a regular tuning. Deliberately yellow, never green.
             verdict, vlabel = 'yellow', 'No pitch raise needed — regular tuning recommended'
         elif abs(wavg) <= VERDICT_RED:
-            verdict, vlabel = 'yellow', 'Tuning recommended'
+            verdict, vlabel = 'yellow', 'Tuning recommended, no pitch raise necessary'
         elif wavg < 0:
             verdict, vlabel = 'red', 'Pitch raise recommended'
         else:

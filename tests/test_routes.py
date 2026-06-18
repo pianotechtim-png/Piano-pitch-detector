@@ -52,6 +52,26 @@ def test_health_ok(client):
     assert resp.get_json() == {"status": "ok"}
 
 
+def test_index_serves_html(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "text/html" in resp.content_type
+
+
+def test_service_worker_is_javascript_and_uncached(client):
+    resp = client.get("/sw.js")
+    assert resp.status_code == 200
+    assert resp.content_type.startswith("application/javascript")
+    # The SW must never be cached or clients get stuck on a stale worker.
+    assert resp.headers["Cache-Control"] == "no-cache"
+
+
+def test_manifest_has_manifest_mimetype(client):
+    resp = client.get("/manifest.json")
+    assert resp.status_code == 200
+    assert resp.content_type.startswith("application/manifest+json")
+
+
 # --------------------------------------------------------------------------- #
 # /analyze validation
 # --------------------------------------------------------------------------- #
